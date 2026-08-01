@@ -3,7 +3,8 @@
 > **A cel-shaded arcade boat racing game built with Three.js**  
 > Anime NPR aesthetics. Gerstner wave ocean. Arcade physics. Zero external assets.
 
-![WAVE DASH Screenshot](screenshot.png)
+![WAVE DASH Screenshot 1](screenshot-1.png)
+![WAVE DASH Screenshot 2](screenshot-2.png)
 
 ## Quick Start
 
