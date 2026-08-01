@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>WAVE DASH — Cel-Shaded Arcade Boat Racer</title>
+  <meta name="description" content="A AAA-quality cel-shaded arcade boat racing game built with Three.js" />
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body { width: 100%; height: 100%; overflow: hidden; background: #0a0516; }
+    canvas { display: block; width: 100% !important; height: 100% !important; }
+    #hud-canvas {
+      position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+      pointer-events: none; z-index: 10;
+    }
+    #loading {
+      position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+      background: #0a0516; display: flex; align-items: center; justify-content: center;
+      flex-direction: column; z-index: 100; font-family: 'Segoe UI', sans-serif; color: #fff;
+    }
+    #loading h1 { font-size: 48px; letter-spacing: 8px; color: #7dd8f7; text-shadow: 0 0 20px #7dd8f7; }
+    #loading p { font-size: 16px; color: #888; margin-top: 12px; letter-spacing: 3px; }
+  </style>
+</head>
+<body>
+  <div id="loading">
+    <h1>WAVE DASH</h1>
+    <p>LOADING...</p>
+  </div>
+  <canvas id="hud-canvas"></canvas>
+  <script type="module" src="/src/main.ts"></script>
+</body>
+</html>
