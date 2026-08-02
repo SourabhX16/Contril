@@ -61,10 +61,10 @@ async function main() {
   });
 
   await page.goto(`${URL}?harness=1&seed=${SEED}`, { waitUntil: 'domcontentloaded' });
-  await page.waitForFunction(() => window.__INKTIDE__?.ready === true, null, { timeout: 60000 });
+  await page.waitForFunction(() => window.__CONTRIL__?.ready === true, null, { timeout: 60000 });
 
   await page.evaluate(() => {
-    const H = window.__INKTIDE__;
+    const H = window.__CONTRIL__;
     H.reset();
     H.setPhase('racing');
     H.setControls({ throttle: 1 });
@@ -74,8 +74,8 @@ async function main() {
   for (const t of AT) {
     const step = t - prev;
     prev = t;
-    if (step > 0) await page.evaluate((s) => window.__INKTIDE__.simulate(s, 1 / 60), step);
-    const rows = await page.evaluate(() => window.__INKTIDE__.probe());
+    if (step > 0) await page.evaluate((s) => window.__CONTRIL__.simulate(s, 1 / 60), step);
+    const rows = await page.evaluate(() => window.__CONTRIL__.probe());
 
     console.log(`\n── t = ${t}s ────────────────────────────────────────────────────────`);
     console.log(

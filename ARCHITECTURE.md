@@ -1,4 +1,4 @@
-# INK TIDE — architecture contract
+# CONTRIL — architecture contract
 
 Read this before touching any subsystem. It is the agreement that lets seven
 subsystems be built in parallel without merge conflicts or integration surprises.
@@ -108,7 +108,7 @@ Register with `game.add(subsystem)`. Never call another subsystem's `update()`.
 
 ## Harness API
 
-`src/main.ts` exposes `window.__INKTIDE__` when loaded with `?harness=1`:
+`src/main.ts` exposes `window.__CONTRIL__` when loaded with `?harness=1`:
 
 | Member | Purpose |
 |---|---|

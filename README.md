@@ -102,7 +102,7 @@ captures from named in-game camera rigs. The same shot name always produces the
 same frame, which is what makes before/after comparison meaningful when you are
 iterating on a shader.
 
-The game exposes `window.__INKTIDE__` under `?harness=1` — `simulate()`,
+The game exposes `window.__CONTRIL__` under `?harness=1` — `simulate()`,
 `setPhase()`, `setControls()`, `setCameraPreset()`, `stats()`. See
 `ARCHITECTURE.md` for the full table.
 
@@ -123,7 +123,7 @@ npm run build && node harness/perf.mjs --seconds=14 --dpr=2
 ```
 
 Mid-race, four boats, chase camera, 1440×810 at device pixel ratio 2.0,
-Apple M5 Pro / Chrome (ANGLE Metal):
+Apple MacBook Air M4 / Chrome (ANGLE Metal):
 
 | | |
 |---|---|

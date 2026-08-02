@@ -2,7 +2,7 @@
  * Bootstrap and frame loop.
  *
  * Owns the `GameContext`, the ordered subsystem list, resize handling, and the
- * `window.__INKTIDE__` harness API. Nothing here knows how any subsystem works
+ * `window.__CONTRIL__` harness API. Nothing here knows how any subsystem works
  * — it only knows the interfaces in core/types.
  */
 
@@ -23,7 +23,7 @@ import { BoatPhysics, createRacer } from './boat/boat';
 import { AiDrivers } from './race/ai';
 import { RaceState } from './race/raceState';
 import { Riders } from './rider/rider';
-import { ChaseCamera, type CameraPreset } from './camera/ChaseCamera';
+import { ChaseCamera, type CameraPreset } from './camera/chaseCamera';
 import { Hud } from './ui/hud';
 import { GameAudio } from './audio/audio';
 
@@ -477,7 +477,7 @@ try {
   // Expose the harness API once the first frame is definitely on screen.
   requestAnimationFrame(() =>
     requestAnimationFrame(() => {
-      (window as any).__INKTIDE__ = game.harness();
+      (window as any).__CONTRIL__ = game.harness();
       boot?.classList.add('gone');
       setTimeout(() => boot?.remove(), 700);
     }),

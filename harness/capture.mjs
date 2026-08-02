@@ -222,7 +222,7 @@ async function main() {
 
   // Wait for the game to announce it is fully constructed.
   try {
-    await page.waitForFunction(() => window.__INKTIDE__?.ready === true, null, { timeout: TIMEOUT });
+    await page.waitForFunction(() => window.__CONTRIL__?.ready === true, null, { timeout: TIMEOUT });
   } catch (err) {
     console.error('\n✗ Game never became ready. Console output:\n');
     console.error(logs.join('\n') || '(no console output)');
@@ -232,7 +232,7 @@ async function main() {
     process.exit(2);
   }
 
-  const renderer = await page.evaluate(() => window.__INKTIDE__.rendererInfo?.() ?? {});
+  const renderer = await page.evaluate(() => window.__CONTRIL__.rendererInfo?.() ?? {});
   console.log(`▸ GL: ${renderer.renderer ?? 'unknown'}`);
   if (/swiftshader|llvmpipe|software/i.test(renderer.renderer ?? '')) {
     console.warn('  ⚠ software rasteriser — captures will be slow but still valid');
@@ -246,7 +246,7 @@ async function main() {
 
     const result = await page.evaluate(
       async ([shotName, shotDef]) => {
-        const H = window.__INKTIDE__;
+        const H = window.__CONTRIL__;
         H.reset();
         if (shotDef.phase) H.setPhase(shotDef.phase);
         H.setControls(shotDef.drive ?? {});

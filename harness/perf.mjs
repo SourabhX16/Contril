@@ -82,9 +82,9 @@ async function main() {
   page.on('pageerror', (e) => errs.push(e.message));
 
   await page.goto(`${URL}?harness=1&seed=2247`, { waitUntil: 'domcontentloaded' });
-  await page.waitForFunction(() => window.__INKTIDE__?.ready === true, null, { timeout: 60000 });
+  await page.waitForFunction(() => window.__CONTRIL__?.ready === true, null, { timeout: 60000 });
 
-  const info = await page.evaluate(() => window.__INKTIDE__.rendererInfo());
+  const info = await page.evaluate(() => window.__CONTRIL__.rendererInfo());
   console.log(`GL: ${info.renderer}`);
   if (/swiftshader|software|llvmpipe/i.test(info.renderer)) {
     console.log('⚠ software rasteriser — these numbers say nothing about real hardware');
@@ -93,7 +93,7 @@ async function main() {
   // Put the game into a representative worst case: mid-race, full throttle,
   // all four boats on screen, chase camera.
   await page.evaluate(() => {
-    const H = window.__INKTIDE__;
+    const H = window.__CONTRIL__;
     H.reset();
     H.setPhase('racing');
     H.setControls({ autopilot: true, throttle: 1 });
@@ -116,7 +116,7 @@ async function main() {
       };
       requestAnimationFrame(tick);
     });
-    const s = window.__INKTIDE__.stats();
+    const s = window.__CONTRIL__.stats();
     return { samples, stats: s };
   }, SECONDS);
 
