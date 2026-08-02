@@ -132,8 +132,3 @@ Performance measurement is intentional: the adaptive pixel-ratio controller samp
 
 ---
 
-## Contributing
-
-Please read `ARCHITECTURE.md` and `KNOWN_GAPS.md` before proposing rendering, physics or audio changes. Keep changes small and verify visually with the harness.
-
-If you'd like, I can open a branch and a PR with this README change — tell me the branch name you'd prefer or I can push to `readme/update`.
