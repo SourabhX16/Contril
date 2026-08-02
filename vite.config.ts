@@ -8,7 +8,7 @@ export default defineConfig({
       // The screenshot harness writes PNGs into the repo. Without this, vite
       // sees the write, triggers a full reload, and destroys the in-flight
       // page.evaluate — which silently truncated capture runs mid-shot-list.
-      ignored: ['**/shots/**', '**/.scratch*/**'],
+      ignored: ['**/shots/**', '**/.scratch*/**', '**/.tmp_unzip/**', '**/tmp_unzip/**', '**/*.png', '**/*.jpg', '**/*.jpeg'],
     },
   },
   build: {
