@@ -10,6 +10,8 @@ npm install
 npm run dev      # → http://localhost:5173
 ```
 
+Live demo: https://contril-7zpy.vercel.app/
+
 ## Controls
 
 | Action | Keyboard | Gamepad |
