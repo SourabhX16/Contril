@@ -23,7 +23,7 @@ import { BoatPhysics, createRacer } from './boat/boat';
 import { AiDrivers } from './race/ai';
 import { RaceState } from './race/raceState';
 import { Riders } from './rider/rider';
-import { ChaseCamera, type CameraPreset } from './camera/chaseCamera';
+import { ChaseCamera, type CameraPreset } from './camera/ChaseCamera';
 import { Hud } from './ui/hud';
 import { GameAudio } from './audio/audio';
 
