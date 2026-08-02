@@ -1,4 +1,4 @@
-# INK TIDE
+# CONTRIL
 
 [![Live demo](https://img.shields.io/badge/Live%20demo-Visit-3DDC84?style=for-the-badge&logo=vercel&logoColor=white)](https://contril-7zpy.vercel.app/)
 
