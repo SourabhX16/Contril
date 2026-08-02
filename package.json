@@ -1,9 +1,9 @@
 {
-  "name": "ink-tide",
+  "name": "contril",
   "private": true,
   "version": "1.0.0",
   "type": "module",
-  "description": "Ink Tide — a cel-shaded arcade boat racing game on an infinite procedural ocean.",
+  "description": "Contril — a cel-shaded arcade boat racing game on an infinite procedural ocean.",
   "scripts": {
     "dev": "vite",
     "build": "vite build",
