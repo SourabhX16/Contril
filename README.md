@@ -127,13 +127,13 @@ Apple MacBook Air M4 / Chrome (ANGLE Metal):
 
 | | |
 |---|---|
-| mean | 8.32 ms (120 fps) |
-| p50 | 8.30 ms |
-| p95 | 9.20 ms |
-| worst | 10.80 ms |
-| frames over 16.9 ms | **0 of 1675** |
-| draw calls | 40 (budget 220) |
-| triangles | 167k (budget 1.6 M) |
+| mean | 16.75 ms (59.7 fps) |
+| p50 | 16.70 ms |
+| p95 | 17.40 ms |
+| worst | 83.40 ms |
+| frames over 16.9 ms | **87 of 815** (10.7%) |
+| draw calls | 73 (budget 220) |
+| triangles | 200k (budget 1.6 M) |
 | adaptive pixel ratio | settled at full 2.00 |
 
 The adaptive controller never had to reduce resolution. It measures a *median*
