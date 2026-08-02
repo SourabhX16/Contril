@@ -1,5 +1,7 @@
 # INK TIDE
 
+[![Live demo](https://img.shields.io/badge/Live%20demo-Visit-3DDC84?style=for-the-badge&logo=vercel&logoColor=white)](https://contril-7zpy.vercel.app/)
+
 A cel-shaded arcade boat racing game on an infinite procedural ocean.
 Vite + TypeScript + Three.js. **Zero external assets** — every mesh, every
 texture and every sound is generated in code.
@@ -10,7 +12,7 @@ npm install
 npm run dev      # → http://localhost:5173
 ```
 
-Live demo: https://contril-7zpy.vercel.app/
+Try the demo: https://contril-7zpy.vercel.app/
 
 ## Controls
 
