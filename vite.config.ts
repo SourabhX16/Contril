@@ -3,7 +3,7 @@ import { defineConfig } from 'vite';
 export default defineConfig({
   server: {
     port: 5173,
-    strictPort: true,
+    strictPort: false,
     watch: {
       // The screenshot harness writes PNGs into the repo. Without this, vite
       // sees the write, triggers a full reload, and destroys the in-flight
