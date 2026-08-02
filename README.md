@@ -1,104 +1,140 @@
-# WAVE DASH 🌊
+# INK TIDE
 
-> **A cel-shaded arcade boat racing game built with Three.js**  
-> Anime NPR aesthetics. Gerstner wave ocean. Arcade physics. Zero external assets.
+A cel-shaded arcade boat racing game on an infinite procedural ocean.
+Vite + TypeScript + Three.js. **Zero external assets** — every mesh, every
+texture and every sound is generated in code.
 
 ![WAVE DASH Screenshot 1](screenshot-1.png)
 ![WAVE DASH Screenshot 2](screenshot-2.png)
 
-## Quick Start
-
 ```bash
 npm install
-npm run dev
-# Open http://localhost:5173
+npm run dev      # → http://localhost:5173
 ```
 
 ## Controls
 
-| Key | Action |
-|-----|--------|
-| `W` / `↑` | Throttle |
-| `S` / `↓` | Brake / Reverse |
-| `A` / `←` | Steer Left |
-| `D` / `→` | Steer Right |
-| `Shift` / `Space` | Drift (hold to charge boost) |
-| `R` | Restart (on results screen) |
+| Action | Keyboard | Gamepad |
+|---|---|---|
+| Throttle | `W` / `↑` | RT or A |
+| Brake / reverse | `S` / `↓` | LT |
+| Steer | `A` `D` / `← →` | Left stick |
+| Powerslide (hold, release for boost) | `Shift` / `Space` | B or RB |
+| Race again (on results) | `R` | — |
+| Cycle camera | `C` | — |
 
-**Drift mechanic:** Hold `Shift` while turning to drift. Fill the boost meter, then release — the boost fires automatically!
+Hold the powerslide through a corner to charge boost — three tiers, longer
+charge means a longer boost. Take the crests on the cross-swell leg at speed
+and you will get air; land flat or you lose time.
 
-## Race Format
+## What's in here
 
-- 4 boats: you (red) vs 3 AI opponents
-- 3 laps around a closed ocean circuit
-- Countdown start → race → results screen
+**Three laps, four boats, one closed circuit** marked on open water by a glowing
+racing line that rides the swell. Countdown start, checkpoint gates, wrong-way
+detection, split times, results board.
+
+- **Infinite ocean** — 6 summed Gerstner waves (long swell + chop + fine detail)
+  displaced in the vertex shader, on a radial grid re-centred on the camera.
+  Absolute world-space wave sampling means no tiling repetition, and a single
+  mesh means no seams and no LOD popping.
+- **Cel-shaded everything** — quantised diffuse through a NearestFilter ramp,
+  banded specular, fresnel rim, drawn matcaps instead of environment probes.
+- **Two ink systems** — inverted-hull outlines at constant screen-space width
+  for exterior silhouettes, plus an MRT G-buffer and a Sobel pass for the
+  interior lines a hull trick cannot produce.
+- **Real buoyancy** — the hull is sampled against the same wave field at six
+  points, so it pitches, rolls and slams into troughs.
+- **Procedural riders** — rigged and animated in code: they lean into turns,
+  shift weight under acceleration, work the throttle, crouch on landings and
+  celebrate at the finish.
+- **Synthesised audio** — engine tone tracking RPM, speed-scaled water rush,
+  impact thuds and a start horn, all Web Audio.
 
 ## Architecture
 
+`ARCHITECTURE.md` is the binding contract: coordinate system, module ownership,
+the cel pipeline API, the frame-loop order, and the performance budget. Read it
+before changing anything.
+
+Quick orientation:
+
 ```
 src/
-├── core/
-│   ├── Engine.ts          # WebGL renderer with adaptive pixel ratio
-│   └── AudioSystem.ts     # Web Audio synthesizer (zero external audio)
-├── rendering/
-│   ├── WaterSystem.ts     # Infinite projected-grid ocean
-│   ├── CelPipeline.ts     # Toon ramp + inverted-hull outlines
-│   └── Sky.ts             # Gradient dome + cel clouds + sun
-├── shaders/
-│   ├── water.ts           # 5 Gerstner waves vertex + cel fragment
-│   └── cel.ts             # Toon, outline, sky GLSL shaders
-├── physics/
-│   └── WaveQuery.ts       # CPU-side wave math for buoyancy
-├── entities/
-│   ├── Boat.ts            # Arcade physics + buoyancy + wake ribbon
-│   └── Rider.ts           # Procedural rig + animation
-├── race/
-│   ├── Course.ts          # CatmullRomCurve3 circuit + gates
-│   ├── RaceManager.ts     # Lap/checkpoint/position tracking
-│   └── AIRacer.ts         # 3-personality AI with rubber-banding
-├── camera/
-│   └── ChaseCamera.ts     # Spring-damped chase + FOV kick + shake
-└── hud/
-    └── HUD.ts             # Canvas HUD: speedo, minimap, boost
+  core/       contracts, palette, config, input, maths, RNG
+  water/      gerstner.ts (THE wave field), ocean mesh, water shader, foam
+  render/     cel materials, procedural textures, post stack, sky
+  boat/       hull geometry, buoyancy, handling
+  rider/      rig + procedural animation
+  race/       spline circuit, gates, lap logic, AI drivers
+  camera/     spring-damped chase rig + harness presets
+  ui/         canvas-2D HUD, minimap, screens
+  audio/      Web Audio synthesis
+harness/      Playwright retina screenshot harness
 ```
 
-## Art Direction
+See `KNOWN_GAPS.md` for an honest, measured account of what is not yet at target.
 
-**Palette (committed globally):**
+Two rules matter more than the rest:
 
-| Role | Color |
-|------|-------|
-| Sky zenith | `#1a0a3a` deep indigo |
-| Sky horizon | `#ff6b35` sunset orange |
-| Water deep | `#0d3b6e` ocean blue |
-| Water mid | `#1e7fa8` aqua |
-| Water crest | `#7dd8f7` light blue |
-| Player boat | `#ff4040` red |
-| AI boats | green / gold / purple |
-| Ink outline | `#0a0516` near-black |
-| Rim light | `#ff9966` warm orange |
+1. **One wave field.** `src/water/gerstner.ts` is the single source of truth.
+   CPU code calls `sampleOcean()`; GPU code includes `GERSTNER_GLSL` and is fed
+   the shared `uWaveA`/`uWaveB` uniforms. If these ever diverge, boats visibly
+   float above or sink through the water.
+2. **One palette.** `src/core/palette.ts`. No colour literals in subsystems.
 
-**Shader systems:**
-- 4-band step-quantized toon diffuse (tuned thresholds, not defaults)
-- Inverted-hull outlines with view-distance scaling
-- Fresnel rim light on all entities
-- Hard-edge banded specular (no smooth falloff)
-- Animated sparkle glitter on water surface
-- 5 Gerstner waves (1 swell + 4 chop layers)
-- Cel cloud blobs in sky with hard rim edges
+## The screenshot harness
 
-## Technical Details
+Every visual claim in this project is verified against a real captured frame,
+never against reasoning about what the code should do.
 
-- **Zero external assets** — all geometry procedural, all audio Web Audio API
-- **Infinite ocean** — projected grid recenters to camera every frame
-- **Buoyancy** — 5 hull points sample real Gerstner height for pitch/roll
-- **Wake ribbon** — geometry generated per boat, spreads + fades
-- **Adaptive pixel ratio** — starts at 2.0×, lowers under GPU load
-- **AI personalities** — aggressive / clean / erratic with rubber-banding
+```bash
+node harness/capture.mjs                        # full shot list
+node harness/capture.mjs --shots=hero,foam_wake # named shots
+node harness/capture.mjs --list                 # what each shot proves
+node harness/capture.mjs --out=shots/round7 --dpr=2 --width=1600
+```
 
-## Stack
+It boots the game headless in Chromium with a real Metal GL backend, drives it
+to a precise deterministic moment (seeded RNG, fixed-step simulation), and
+captures from named in-game camera rigs. The same shot name always produces the
+same frame, which is what makes before/after comparison meaningful when you are
+iterating on a shader.
 
-- [Vite](https://vitejs.dev/) + TypeScript
-- [Three.js](https://threejs.org/) r169+
-- Web Audio API (no external audio libraries)
-- Vanilla CSS (no frameworks)
+The game exposes `window.__INKTIDE__` under `?harness=1` — `simulate()`,
+`setPhase()`, `setControls()`, `setCameraPreset()`, `stats()`. See
+`ARCHITECTURE.md` for the full table.
+
+## Debug
+
+`?debug=1` adds a perf overlay (fps, frame time, pixel ratio, draw calls,
+triangles). `?seed=1234` reseeds every procedural decision.
+
+## Performance
+
+Measured, not assumed. `harness/perf.mjs` runs the **production build** on the
+real rAF clock and samples actual frame intervals — the capture harness's own
+numbers are meaningless here because it steps with a fixed dt and never waits on
+vsync.
+
+```bash
+npm run build && node harness/perf.mjs --seconds=14 --dpr=2
+```
+
+Mid-race, four boats, chase camera, 1440×810 at device pixel ratio 2.0,
+Apple M5 Pro / Chrome (ANGLE Metal):
+
+| | |
+|---|---|
+| mean | 8.32 ms (120 fps) |
+| p50 | 8.30 ms |
+| p95 | 9.20 ms |
+| worst | 10.80 ms |
+| frames over 16.9 ms | **0 of 1675** |
+| draw calls | 40 (budget 220) |
+| triangles | 167k (budget 1.6 M) |
+| adaptive pixel ratio | settled at full 2.00 |
+
+The adaptive controller never had to reduce resolution. It measures a *median*
+frame time (so one GC spike cannot drop the resolution), backs off fast when the
+budget is blown, and climbs back slowly — an oscillating resolution is more
+distracting than running slightly soft.

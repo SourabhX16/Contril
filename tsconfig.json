@@ -1,25 +1,23 @@
 {
   "compilerOptions": {
-    "target": "es2023",
-    "module": "esnext",
-    "lib": ["ES2023", "DOM"],
-    "types": ["vite/client"],
-    "allowArbitraryExtensions": true,
-    "skipLibCheck": true,
-
-    /* Bundler mode */
+    "target": "ES2022",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "module": "ESNext",
     "moduleResolution": "bundler",
-    "allowImportingTsExtensions": true,
-    "verbatimModuleSyntax": true,
-    "moduleDetection": "force",
-    "noEmit": true,
-
-    /* Linting — relaxed for game dev */
+    "types": [],
+    "strict": true,
     "noUnusedLocals": false,
     "noUnusedParameters": false,
-    "erasableSyntaxOnly": true,
+    "noImplicitOverride": true,
     "noFallthroughCasesInSwitch": true,
-    "strict": false
+    "exactOptionalPropertyTypes": false,
+    "useDefineForClassFields": true,
+    "skipLibCheck": true,
+    "isolatedModules": true,
+    "verbatimModuleSyntax": false,
+    "resolveJsonModule": true,
+    "allowImportingTsExtensions": true,
+    "noEmit": true
   },
-  "include": ["src"]
+  "include": ["src", "harness", "vite.config.ts"]
 }
