@@ -4,8 +4,6 @@ A cel-shaded arcade boat racing game on an infinite procedural ocean.
 Vite + TypeScript + Three.js. **Zero external assets** — every mesh, every
 texture and every sound is generated in code.
 
-![WAVE DASH Screenshot 1](screenshot-1.png)
-![WAVE DASH Screenshot 2](screenshot-2.png)
 
 ```bash
 npm install
