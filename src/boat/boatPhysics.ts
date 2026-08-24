@@ -184,10 +184,18 @@ export class BoatPhysics implements Subsystem {
   }
 
   update(ctx: GameContext) {
-    for (const r of this.racers) this.step(ctx, r);
+    // Menu open: the whole field holds its grid marks — no solver, no drift.
+    if (ctx.race.paused) return;
+    for (const r of this.racers) {
+      // Remote racers are owned by the net subsystem: their transforms arrive
+      // as snapshots, so integrating them here would fight the interpolator.
+      if (!r.remote) this.step(ctx, r);
+    }
     this.resolveCollisions(ctx);
     // Attitude is written after collisions so a hit that kicks yaw shows up on
-    // the same frame rather than one frame late.
+    // the same frame rather than one frame late. Remote racers are included:
+    // their state was written from snapshots this frame, and every reader of
+    // root.rotation assumes this loop produced it.
     for (const r of this.racers) {
       const g = this.internals.get(r.id)!;
       const s = r.state;
@@ -595,6 +603,10 @@ export class BoatPhysics implements Subsystem {
    * pure ceremony. Resolution is a positional split plus an elastic-ish impulse
    * along the contact normal, and a yaw kick proportional to the moment arm so
    * a stern-quarter hit spins you the way it should.
+   *
+   * Remote hulls count as infinite mass: they never move here (the snapshot
+   * stream owns their transform), so any correction or impulse goes entirely
+   * into the locally-simulated side.
    */
   private resolveCollisions(ctx: GameContext) {
     const cfg = CONFIG.boat;
@@ -605,6 +617,9 @@ export class BoatPhysics implements Subsystem {
       for (let j = i + 1; j < racers.length; j++) {
         const A = racers[i];
         const B = racers[j];
+        const simA = !A.remote;
+        const simB = !B.remote;
+        if (!simA && !simB) continue;
         // Cheap reject on hull centres before touching the sphere pairs.
         const cdx = B.root.position.x - A.root.position.x;
         const cdz = B.root.position.z - A.root.position.z;
@@ -633,20 +648,30 @@ export class BoatPhysics implements Subsystem {
             const nz = dz / d;
             const overlap = min - d;
 
-            A.root.position.x -= nx * overlap * 0.5;
-            A.root.position.z -= nz * overlap * 0.5;
-            B.root.position.x += nx * overlap * 0.5;
-            B.root.position.z += nz * overlap * 0.5;
+            // Positional split: half each when both sides are simulated, all of
+            // it to the simulated side when the other is network-owned.
+            const wA = simA && simB ? 0.5 : simA ? 1 : 0;
+            const wB = 1 - wA;
+            A.root.position.x -= nx * overlap * wA;
+            A.root.position.z -= nz * overlap * wA;
+            B.root.position.x += nx * overlap * wB;
+            B.root.position.z += nz * overlap * wB;
 
             const rvx = B.state.velocity.x - A.state.velocity.x;
             const rvz = B.state.velocity.z - A.state.velocity.z;
             const closing = rvx * nx + rvz * nz;
             if (closing < 0) {
-              const jimp = -(1 + cfg.collisionRestitution) * closing * 0.5;
-              A.state.velocity.x -= nx * jimp;
-              A.state.velocity.z -= nz * jimp;
-              B.state.velocity.x += nx * jimp;
-              B.state.velocity.z += nz * jimp;
+              // Equal-mass impulse is halved between two simulated hulls; a
+              // remote hull acts as a wall and takes the full hit locally.
+              const jimp = -(1 + cfg.collisionRestitution) * closing * (simA && simB ? 0.5 : 1);
+              if (simA) {
+                A.state.velocity.x -= nx * jimp;
+                A.state.velocity.z -= nz * jimp;
+              }
+              if (simB) {
+                B.state.velocity.x += nx * jimp;
+                B.state.velocity.z += nz * jimp;
+              }
 
               // Yaw kick from the moment arm of the contact point.
               const gA = this.internals.get(A.id)!;
@@ -656,10 +681,11 @@ export class BoatPhysics implements Subsystem {
               const spin = clamp(-closing * cfg.collisionSpin, 0, 2.2);
               const sideA = Math.sign(nx * Math.cos(A.state.heading) - nz * Math.sin(A.state.heading));
               const sideB = Math.sign(nx * Math.cos(B.state.heading) - nz * Math.sin(B.state.heading));
-              gA.yawVel += spin * armA * sideA * -1;
-              gB.yawVel += spin * armB * sideB;
+              if (simA) gA.yawVel += spin * armA * sideA * -1;
+              if (simB) gB.yawVel += spin * armB * sideB;
 
               for (const racer of [A, B]) {
+                if (racer.remote) continue;
                 const g = this.internals.get(racer.id)!;
                 if (g.hitCooldown > 0) continue;
                 g.hitCooldown = 0.18;

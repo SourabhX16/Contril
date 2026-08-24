@@ -65,7 +65,10 @@ export function createRacer(id: RacerId, position: Vector3, heading: number): Ra
 
   return {
     id,
-    isPlayer: id === 0,
+    // Identity is assigned per race by the lobby (solo: slot 0; multiplayer:
+    // whoever owns the slot). Everything reads `ctx.player` live.
+    isPlayer: false,
+    remote: false,
     name: RACER_NAMES[id],
     root,
     state,

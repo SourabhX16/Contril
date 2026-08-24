@@ -202,7 +202,9 @@ export class AiDrivers implements Subsystem {
   ) {
     let seed = 0xa11ce;
     for (const r of racers) {
-      if (r.isPlayer) continue;
+      // A brain per slot, including the player's: in multiplayer any slot can
+      // lose its human (they leave mid-race), and the boat must fall back to
+      // an AI driver without rebuilding anything.
       const profile = PROFILES[r.personality ?? 'clean'] ?? PROFILES.clean;
       seed = (seed * 1664525 + 1013904223) >>> 0;
       const rng = new Rng(seed);
@@ -229,8 +231,9 @@ export class AiDrivers implements Subsystem {
   }
 
   update(ctx: GameContext) {
+    if (ctx.race.paused) return;
     for (const r of this.racers) {
-      if (r.isPlayer) continue;
+      if (r.isPlayer || r.remote) continue;
       this.drive(ctx, r);
     }
   }
