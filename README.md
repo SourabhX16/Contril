@@ -31,8 +31,22 @@ Visit **http://localhost:5173** to play locally.
 | **Drift & Boost** | Hold `Shift` / `Space` | B / RB |
 | **Restart Race** | `R` (on results screen) | — |
 | **Change Camera** | `C` | — |
+| **Back to Menu** | `Esc` (on results screen / lobby) | — |
 
 * **Drift Mechanic:** Hold `Shift` while steering through corners to build up your boost meter (3 tiers). Release for an instant speed burst!
+
+---
+
+## 🌐 Multiplayer
+
+Online races are peer-to-peer (WebRTC via [Trystero](https://github.com/dmotz/trystero)) — there is **no game server**, and signalling runs over public Nostr relays, so the static deployment works unchanged.
+
+* **Host online** from the title menu to open a room and get a 5-letter code; friends pick **Join with code** (or open `?room=CODE`).
+* Up to **4 human racers**; empty grid slots are filled by the usual AI drivers.
+* Each client simulates its own boat and broadcasts snapshots at 15 Hz; remote boats are interpolated with a 130 ms buffer. The host simulates the AI field, so every client sees the same race.
+* Race start and restarts are synchronised to a shared countdown anchored on each client's own monotonic clock — wall-clock skew never enters it.
+* A human who disconnects mid-race is replaced by their slot's AI driver.
+* Solo play is untouched: pick **Solo race**, or add `?quick=1` to boot straight into a race.
 
 ---
 
@@ -59,10 +73,11 @@ src/
   boat/       hull geometry, buoyancy, handling
   rider/      rig + procedural animation
   race/       spline circuit, gates, lap logic, AI drivers
+  net/        P2P session (Trystero), snapshot broadcast/interpolation
   camera/     spring-damped chase rig + harness presets
-  ui/         canvas-2D HUD, minimap, screens
+  ui/         canvas-2D HUD, minimap, screens, title/lobby menu
   audio/      Web Audio synthesis
-harness/      Playwright retina screenshot harness
+harness/      Playwright retina screenshot harness + multiplayer probe
 ```
 
 Two rules that matter more than anything else:

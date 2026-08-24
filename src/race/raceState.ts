@@ -61,9 +61,24 @@ export class RaceState implements RaceAPI, Subsystem {
   phase: RacePhase = 'countdown';
   raceTime = -CONFIG.race.countdownSeconds;
   countdownNumber = 3;
+  /** Holds the whole state machine (menu on screen). Nothing accumulates. */
+  paused = false;
 
   readonly racers: Racer[];
-  readonly player: Racer;
+
+  /**
+   * When set (multiplayer), `raceTime` is derived from the local monotonic
+   * clock against this green-light moment instead of integrating dt — every
+   * client counts down to the same instant without trusting wall-clock skew.
+   */
+  netGreenAt: number | null = null;
+
+  /**
+   * Set by main when a restart must be coordinated over the network. Returning
+   * true means "handled externally"; the local state machine then does nothing
+   * and waits for the broadcast start to reset everyone together.
+   */
+  onRestartRequest: (() => boolean) | null = null;
 
   private progressData = new Map<number, RacerProgress>();
   private finishOrder: Racer[] = [];
@@ -79,8 +94,12 @@ export class RaceState implements RaceAPI, Subsystem {
     private onRestart: () => void,
   ) {
     this.racers = racers;
-    this.player = racers.find((r) => r.isPlayer)!;
     this.resetProgress();
+  }
+
+  /** Resolved live: multiplayer re-assigns which slot is the player. */
+  get player(): Racer {
+    return this.racers.find((r) => r.isPlayer) ?? this.racers[0];
   }
 
   private resetProgress() {
@@ -119,8 +138,21 @@ export class RaceState implements RaceAPI, Subsystem {
     this.finishOrder = [];
     this.resultsTimer = 0;
     this.lastCountdownBeep = 99;
+    this.netGreenAt = null;
     this.onRestart();
     this.resetProgress();
+  }
+
+  /**
+   * Begin a race anchored to a network countdown. `cdMs` counts from *now* on
+   * the local monotonic clock, so peers agree on the green-light instant
+   * without their wall clocks agreeing on anything.
+   */
+  beginNetRace(cdMs: number) {
+    this.restart();
+    this.netGreenAt = performance.now() + Math.max(0, cdMs);
+    // restart() cleared it; re-apply after, since it defines the clock from
+    // here on.
   }
 
   standings(): Racer[] {
@@ -143,7 +175,15 @@ export class RaceState implements RaceAPI, Subsystem {
   }
 
   update(ctx: GameContext) {
+    if (this.paused) return;
     const { dt } = ctx;
+
+    // Network races derive the clock instead of integrating it: dt drift and
+    // frame hitches on one client would otherwise desync the countdown and
+    // every finish time by however much that client stuttered.
+    if (this.netGreenAt !== null) {
+      this.raceTime = (performance.now() - this.netGreenAt) / 1000 - CONFIG.race.countdownSeconds;
+    }
 
     switch (this.phase) {
       case 'countdown': {
@@ -205,7 +245,11 @@ export class RaceState implements RaceAPI, Subsystem {
 
       case 'results': {
         this.resultsTimer += dt;
-        if (ctx.input.restartPressed || ctx.input.startPressed) this.restart();
+        if (ctx.input.restartPressed || ctx.input.startPressed) {
+          // Solo: reset locally. Multiplayer: main's hook broadcasts a start
+          // message instead, and every client resets when it arrives.
+          if (!this.onRestartRequest?.()) this.restart();
+        }
         break;
       }
     }

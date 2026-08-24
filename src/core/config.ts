@@ -198,6 +198,21 @@ export const CONFIG = {
     avoidRadius: 6.5,
   },
 
+  net: {
+    /** Trystero application id — scopes room codes away from other apps. */
+    appId: 'contril-race-v1',
+    /** Own-boat snapshot rate, and the host's AI broadcast rate. */
+    sendHz: 15,
+    /**
+     * Latency applied to remote snapshots before rendering them, ms. High
+     * enough that two snapshots always straddle the render time on a healthy
+     * connection; low enough that a remote boat still feels present.
+     */
+    interpDelayMs: 130,
+    /** How far past the newest snapshot we may dead-reckon, ms. */
+    extrapolateMs: 350,
+  },
+
   camera: {
     /** Chase rig offsets in the boat's local frame. */
     distance: 11.2,
@@ -220,6 +235,14 @@ export const CONFIG = {
     enabled: new URLSearchParams(location.search).has('debug'),
     /** Set by ?harness=1 — deterministic time, no audio, harness API exposed. */
     harness: new URLSearchParams(location.search).has('harness'),
+    /**
+     * Set by ?harness=1 or ?quick=1 — boot straight into a solo race instead
+     * of the title menu. The harness depends on this; ?quick is the same
+     * shortcut for humans.
+     */
+    skipMenu:
+      new URLSearchParams(location.search).has('harness') ||
+      new URLSearchParams(location.search).has('quick'),
   },
 } as const;
 

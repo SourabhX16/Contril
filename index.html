@@ -22,6 +22,86 @@
         transition: opacity .5s ease; z-index: 10;
       }
       #boot.gone { opacity: 0; pointer-events: none; }
+
+      /* ── Title / lobby menu ────────────────────────────────────────────────
+         Ink aesthetic shared with the HUD: hard-edged skewed plates on the deep
+         ink navy, paper-white type, one vermilion accent. No gradients — flat
+         fills, hairline edges, letterspaced caps. */
+      #menu {
+        position: absolute; inset: 0; z-index: 20;
+        display: grid; place-items: center;
+        color: #f2fbff; user-select: none;
+      }
+      #menu.hidden { display: none; }
+      .panel {
+        width: min(420px, calc(100vw - 48px));
+        padding: 34px 36px 30px;
+        background: rgba(10, 26, 46, .88);
+        border: 1px solid rgba(127, 224, 245, .35);
+        transform: skewX(-4deg);
+      }
+      .panel > * { transform: skewX(4deg); }
+      .title {
+        font-size: 44px; font-weight: 900; letter-spacing: .12em;
+        color: #f2fbff;
+        text-shadow: 3px 3px 0 #ff4f3d, 6px 6px 0 rgba(10, 26, 46, .9);
+        margin-bottom: 2px;
+      }
+      .tagline {
+        font-size: 11px; font-weight: 700; letter-spacing: .32em;
+        text-transform: uppercase; color: #7fe0f5; margin-bottom: 24px;
+      }
+      .field-label {
+        font-size: 10px; font-weight: 800; letter-spacing: .28em;
+        text-transform: uppercase; color: #6f96b8; margin: 14px 0 6px;
+      }
+      .menu-input {
+        width: 100%; padding: 10px 12px;
+        background: #081426; border: 1px solid #17324f; color: #f2fbff;
+        font: 800 15px/1 ui-sans-serif, system-ui, sans-serif;
+        letter-spacing: .18em; text-transform: uppercase; outline: none;
+      }
+      .menu-input:focus { border-color: #7fe0f5; }
+      .menu-input.code { text-align: center; letter-spacing: .5em; font-size: 20px; }
+      .btn-row { display: flex; gap: 10px; margin-top: 10px; }
+      .mbtn {
+        flex: 1; padding: 13px 8px; cursor: pointer;
+        background: #17324f; color: #f2fbff; border: 1px solid rgba(242, 251, 255, .55);
+        font: 800 13px/1 ui-sans-serif, system-ui, sans-serif;
+        letter-spacing: .22em; text-transform: uppercase;
+        transition: background .12s ease, border-color .12s ease;
+      }
+      .mbtn:hover { background: #ff4f3d; border-color: #ff4f3d; color: #081426; }
+      .mbtn.primary { background: #ff4f3d; border-color: #ff4f3d; color: #081426; }
+      .mbtn.primary:hover { background: #fff06b; border-color: #fff06b; }
+      .mbtn:disabled { opacity: .45; cursor: default; }
+      .mbtn:disabled:hover { background: #17324f; border-color: rgba(242, 251, 255, .55); color: #f2fbff; }
+      .view { display: none; }
+      .view.on { display: block; }
+      .code-big {
+        font-size: 40px; font-weight: 900; letter-spacing: .3em; text-align: center;
+        color: #fff06b; text-shadow: 2px 2px 0 #081426;
+        padding: 12px 0 10px; cursor: pointer; border: 1px dashed rgba(127, 224, 245, .4);
+        margin: 6px 0 4px;
+      }
+      .code-hint { text-align: center; font-size: 10px; letter-spacing: .24em;
+        text-transform: uppercase; color: #6f96b8; margin-bottom: 16px; }
+      .roster { list-style: none; margin: 8px 0 16px; }
+      .roster li {
+        display: flex; align-items: center; gap: 12px;
+        padding: 9px 12px; margin-bottom: 6px;
+        background: rgba(23, 50, 79, .65); border: 1px solid rgba(242, 251, 255, .25);
+        font: 800 13px/1 ui-sans-serif, system-ui, sans-serif; letter-spacing: .14em;
+        text-transform: uppercase;
+      }
+      .chip { width: 14px; height: 14px; transform: skewX(-12deg); flex: none; }
+      .roster .slot-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .roster .slot-tag { font-size: 9px; letter-spacing: .2em; color: #6f96b8; }
+      .status {
+        min-height: 18px; margin-top: 12px; font-size: 11px; font-weight: 700;
+        letter-spacing: .14em; text-transform: uppercase; color: #ff5a5a;
+      }
+      .status.info { color: #7fe0f5; }
     </style>
   </head>
   <body>
@@ -29,6 +109,38 @@
       <canvas id="gl"></canvas>
       <canvas id="hud"></canvas>
       <div id="boot">Contril</div>
+      <div id="menu">
+        <div class="panel">
+          <div class="title">CONTRIL</div>
+          <div class="tagline">Cel-shaded arcade boat racing</div>
+
+          <div class="view on" data-view="title">
+            <div class="field-label">Pilot name</div>
+            <input id="m-name" class="menu-input" maxlength="10" spellcheck="false" autocomplete="off" placeholder="PILOT" />
+            <div class="btn-row">
+              <button id="m-solo" class="mbtn primary">Solo race</button>
+              <button id="m-host" class="mbtn">Host online</button>
+            </div>
+            <div class="field-label">Join with code</div>
+            <div class="btn-row">
+              <input id="m-code" class="menu-input code" maxlength="5" spellcheck="false" autocomplete="off" placeholder="CODE" />
+              <button id="m-join" class="mbtn" style="flex:0 0 auto;padding:13px 18px;">Join</button>
+            </div>
+          </div>
+
+          <div class="view" data-view="lobby">
+            <div class="field-label" style="margin-top:0;">Room code — tap to copy</div>
+            <div id="m-room-code" class="code-big" title="Copy code">·····</div>
+            <div class="code-hint">Share it — friends pick “Join with code”</div>
+            <ul id="m-roster" class="roster"></ul>
+            <div id="m-lobby-status" class="status info"></div>
+            <div class="btn-row">
+              <button id="m-back" class="mbtn">Back</button>
+              <button id="m-start" class="mbtn primary" disabled>Start race</button>
+            </div>
+          </div>
+        </div>
+      </div>
     </div>
     <script type="module" src="/src/main.ts"></script>
   </body>

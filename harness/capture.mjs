@@ -194,8 +194,10 @@ async function main() {
     args: [
       // Headless Chromium needs a real GL backend or every shader silently
       // falls back to SwiftShader and the captures stop reflecting the game.
+      // The ANGLE backend is per-OS: metal is macOS-only and loses the context
+      // outright on Windows/Linux.
       '--use-gl=angle',
-      '--use-angle=metal',
+      `--use-angle=${process.platform === 'darwin' ? 'metal' : process.platform === 'win32' ? 'd3d11' : 'vulkan'}`,
       '--enable-unsafe-webgpu',
       '--ignore-gpu-blocklist',
       '--enable-gpu-rasterization',

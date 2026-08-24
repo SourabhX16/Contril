@@ -12,7 +12,8 @@
     "shots": "node harness/capture.mjs"
   },
   "dependencies": {
-    "three": "^0.185.1"
+    "three": "^0.185.1",
+    "trystero": "^0.25.3"
   },
   "devDependencies": {
     "@types/three": "^0.185.1",

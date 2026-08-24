@@ -26,6 +26,12 @@ import { Riders } from './rider/rider';
 import { ChaseCamera, type CameraPreset } from './camera/chaseCamera';
 import { Hud } from './ui/hud';
 import { GameAudio } from './audio/audio';
+import { NetSession, type StartMsg } from './net/session';
+import { NetSync } from './net/netSync';
+import { Menu } from './ui/menu';
+
+/** Grid names per slot. Humans rename slots 1–3 only by joining them. */
+export const SLOT_NAMES = ['YOU', 'KAIRA', 'NOX', 'PIP'];
 
 class Game {
   private scene = new Scene();
@@ -40,6 +46,9 @@ class Game {
   private hud: Hud;
   private audio = new GameAudio();
   private racers: Racer[] = [];
+  private session: NetSession;
+  private netSync!: NetSync;
+  private menu!: Menu;
 
   private ctx: GameContext;
   private lastTime = 0;
@@ -81,8 +90,27 @@ class Game {
     }
 
     this.race = new RaceState(this.racers, this.track, () => this.resetRacers());
+    this.race.paused = true; // the menu owns the first decision
     this.hud = new Hud(hudCanvas, this.track);
     this.composer = new InkComposer(renderer, this.scene, this.cameraRig.camera);
+
+    // ── Networking ────────────────────────────────────────────────────────────
+    this.session = new NetSession({
+      onLobbyChanged: () => {
+        this.applyRoster();
+        this.menu.refreshLobby();
+      },
+      onStart: (msg) => this.beginNetRace(msg),
+      onSnapshot: (snap) => this.netSync.ingest(snap),
+      onAiBatch: (batch) => batch.forEach((s) => this.netSync.ingest(s)),
+      onError: (message) => {
+        void this.backToMenu();
+        this.menu.showError(message);
+      },
+    });
+    this.netSync = new NetSync(this.racers, this.session, (x, z, t) =>
+      this.ocean.height(x, z, t),
+    );
 
     // ── Context ─────────────────────────────────────────────────────────────
     this.ctx = {
@@ -113,9 +141,44 @@ class Game {
       this.track,
       new BoatPhysics(this.racers),
       new AiDrivers(this.racers, this.track),
+      this.netSync,
       this.race,
       new Riders(this.racers),
     ].sort((a, b) => a.order - b.order);
+
+    // Restart requests route through the network when one is live.
+    this.race.onRestartRequest = () => {
+      if (!this.session.active) return false;
+      const cd = CONFIG.race.countdownSeconds * 1000;
+      this.session.broadcastStart(cd);
+      this.beginNetRace({ cd });
+      return true;
+    };
+
+    // ── Menu ────────────────────────────────────────────────────────────────
+    this.menu = new Menu(
+      {
+        solo: () => this.startSolo(),
+        host: (name) => {
+          const code = this.session.host(name);
+          this.applyRoster();
+          this.menu.showLobby(code, true);
+        },
+        join: (code, name) => {
+          this.session.join(code, name);
+          this.menu.showLobby(code.toUpperCase(), false);
+        },
+        start: () => {
+          if (this.session.role !== 'host') return;
+          const cd = CONFIG.race.countdownSeconds * 1000;
+          this.session.broadcastStart(cd);
+          this.beginNetRace({ cd });
+        },
+        leave: () => void this.backToMenu(),
+      },
+      this.session,
+      () => this.race.phase === 'results',
+    );
 
     this.resize();
     window.addEventListener('resize', () => this.resize());
@@ -153,6 +216,7 @@ class Game {
     for (const r of this.racers) {
       const grid = this.track.startGrid(r.id);
       r.root.position.copy(grid.position);
+      r.root.rotation.set(0, grid.heading, 0);
       r.state.velocity.set(0, 0, 0);
       r.state.heading = grid.heading;
       r.state.forwardSpeed = 0;
@@ -171,7 +235,72 @@ class Game {
       r.bestLap = Infinity;
       r.wrongWay = false;
     }
+    // Remote snapshots describe the *previous* race; drop them so remote boats
+    // hold their grid marks until fresh frames arrive.
+    this.netSync?.reset();
     this.cameraRig.snapToTarget();
+  }
+
+  // ── Multiplayer flows ──────────────────────────────────────────────────────
+
+  /**
+   * Map the lobby roster onto the four racer slots.
+   *
+   * A slot is *yours* if the roster gave it to you; *remote* (network-driven)
+   * if someone else owns it — or, on a guest, if it is an AI slot, since on
+   * guests even the AI is simulated by the host and arrives as snapshots.
+   * Anything not remote and not yours is locally-simulated AI.
+   */
+  private applyRoster() {
+    const s = this.session;
+    for (const r of this.racers) {
+      const mine = s.active && r.id === s.mySlot;
+      const human = s.roster.find((p) => p.slot === r.id);
+      r.isPlayer = mine;
+      r.remote = !mine && (s.role === 'guest' || (!!human && human.peerId !== s.myPeerId));
+      if (mine) r.name = SLOT_NAMES[0];
+      else if (human && human.name && human.name !== '…') r.name = human.name.slice(0, 10);
+      else r.name = SLOT_NAMES[r.id];
+    }
+    if (s.active && s.mySlot >= 0) this.ctx.player = this.racers[s.mySlot];
+  }
+
+  /** Classic single-player: slot 0 is you, slots 1–3 are the AI field. */
+  private startSolo() {
+    for (const r of this.racers) {
+      r.isPlayer = r.id === 0;
+      r.remote = false;
+      r.name = SLOT_NAMES[r.id];
+    }
+    this.ctx.player = this.racers[0];
+    this.menu.hide();
+    this.race.restart();
+    this.race.paused = false;
+  }
+
+  /** A start (or restart) message arrived — or the host just sent one. */
+  private beginNetRace(msg: StartMsg) {
+    this.applyRoster();
+    this.netSync.reset();
+    this.session.raceRunning = true;
+    this.menu.hide();
+    this.race.beginNetRace(msg.cd);
+    this.race.paused = false;
+  }
+
+  /** Tear the session down and put the title screen back up. */
+  private async backToMenu() {
+    await this.session.leave();
+    for (const r of this.racers) {
+      r.isPlayer = false;
+      r.remote = false;
+      r.name = SLOT_NAMES[r.id];
+    }
+    this.ctx.player = this.racers[0];
+    this.netSync.reset();
+    this.race.restart();
+    this.race.paused = true;
+    this.menu.showTitle();
   }
 
   resize() {
@@ -227,7 +356,8 @@ class Game {
 
     // ── Input ───────────────────────────────────────────────────────────────
     this.input.update(ctx.dt);
-    const pc = this.racers[0].controls;
+    // The local player's slot is lobby-dependent in multiplayer.
+    const pc = ctx.player.controls;
     if (this.forcedControls) {
       pc.throttle = this.forcedControls.throttle ?? 0;
       pc.brake = this.forcedControls.brake ?? 0;
@@ -237,7 +367,7 @@ class Game {
       // every captured frame and pushed the AI pack out of shot. Autopilot steers
       // the player along the spline so shots frame a real racing situation.
       pc.steer = this.forcedControls.autopilot
-        ? this.autopilotSteer(this.racers[0])
+        ? this.autopilotSteer(ctx.player)
         : this.forcedControls.steer ?? 0;
     } else {
       const s = this.input.state;
@@ -246,7 +376,8 @@ class Game {
       pc.brake = s.brake;
       pc.drift = s.drift;
     }
-    if (this.input.state.restartPressed && this.race.phase === 'results') this.race.restart();
+    // (Restart input on the results screen is consumed by the race state
+    // machine, which routes it through the network when one is live.)
 
     // ── Shared shader uniforms — written once for the whole scene ────────────
     SHARED.uTime.value = ctx.time;
@@ -286,6 +417,12 @@ class Game {
   }
 
   // ── Harness API ───────────────────────────────────────────────────────────
+
+  /** Boot straight into a solo race (harness / ?quick). */
+  harnessSkipMenu() {
+    this.menu.hide();
+    this.startSolo();
+  }
 
   harness() {
     const self = this;
@@ -473,6 +610,12 @@ const boot = document.getElementById('boot');
 try {
   const game = new Game(glCanvas, hudCanvas);
   game.start();
+
+  // The menu owns the first decision — unless the harness (or ?quick) needs
+  // the game to boot straight into a solo race exactly as it always did.
+  if (CONFIG.debug.skipMenu) {
+    game.harnessSkipMenu();
+  }
 
   // Expose the harness API once the first frame is definitely on screen.
   requestAnimationFrame(() =>
