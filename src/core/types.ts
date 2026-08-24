@@ -71,8 +71,19 @@ export type AiPersonality = 'aggressive' | 'clean' | 'erratic';
 
 export interface Racer {
   readonly id: RacerId;
-  readonly isPlayer: boolean;
-  readonly name: string;
+  /**
+   * True for the locally-driven boat. Mutable: multiplayer re-assigns which
+   * slot is "you" when a lobby starts a race, and everything else in the game
+   * reads it live through `ctx.player`.
+   */
+  isPlayer: boolean;
+  /**
+   * True while this racer is driven by network snapshots (a remote human, or —
+   * on a guest — an AI the host is simulating). BoatPhysics and AiDrivers skip
+   * remote racers; the net subsystem owns their transforms.
+   */
+  remote: boolean;
+  name: string;
   /** Root transform; the hull mesh, outline hull and rider are parented here. */
   readonly root: Object3D;
   readonly state: BoatState;
@@ -142,6 +153,11 @@ export interface RaceAPI {
   raceTime: number;
   /** 3, 2, 1, 0 = GO. -1 when not counting down. */
   countdownNumber: number;
+  /**
+   * When true the whole state machine holds still (the menu is on screen).
+   * The ocean and camera keep animating behind it.
+   */
+  paused: boolean;
   readonly racers: Racer[];
   readonly player: Racer;
   /** Field sorted by current position. */
