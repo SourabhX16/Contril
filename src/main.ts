@@ -114,6 +114,13 @@ class Game {
       onStart: (msg) => this.beginNetRace(msg),
       onSnapshot: (snap) => this.netSync.ingest(snap),
       onAiBatch: (batch) => batch.forEach((s) => this.netSync.ingest(s)),
+      onMissile: (msg) => {
+        // Spawn a remote missile from the firing racer's position toward the target.
+        const r = this.racers[msg.slot];
+        if (r && this.weapons) {
+          this.weapons.spawnRemote(r, msg.ox, msg.oz, msg.tx, msg.tz);
+        }
+      },
       onError: (message) => {
         void this.backToMenu();
         this.menu.showError(message);
@@ -467,7 +474,15 @@ class Game {
           tx = me.state.position.x - Math.sin(heading) * 200 + s.stickRx * 80;
           tz = me.state.position.z - Math.cos(heading) * 200 + s.stickRy * 80;
         }
-        ctx.weapons.fire(me, tx, tz);
+        if (ctx.weapons.fire(me, tx, tz)) {
+          this.session.broadcastMissile({
+            slot: me.id,
+            ox: Math.round(me.state.position.x * 10) / 10,
+            oz: Math.round(me.state.position.z * 10) / 10,
+            tx: Math.round(tx * 10) / 10,
+            tz: Math.round(tz * 10) / 10,
+          });
+        }
       }
     }
     // (Restart input on the results screen is consumed by the race state
@@ -480,6 +495,14 @@ class Game {
 
     // ── Subsystems ──────────────────────────────────────────────────────────
     for (const s of this.subsystems) s.update(ctx);
+
+    // Drain AI missile fires for network broadcast.
+    if (this.weapons) {
+      for (const f of this.weapons.pendingFires) {
+        this.session.broadcastMissile(f);
+      }
+      this.weapons.pendingFires.length = 0;
+    }
 
     // Camera and audio run after everything that can move the boat.
     if (this.race.phase === 'countdown' || this.race.phase === 'results') {

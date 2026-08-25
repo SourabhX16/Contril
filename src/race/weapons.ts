@@ -42,6 +42,12 @@ export class Weapons implements Subsystem, WeaponsAPI {
    */
   readonly booms: { x: number; z: number; strength: number; owner: Racer }[] = [];
 
+  /**
+   * Missile fires that need network broadcast.  AI fires are pushed here;
+   * main.ts drains and broadcasts them each frame.
+   */
+  readonly pendingFires: { slot: number; ox: number; oz: number; tx: number; tz: number }[] = [];
+
   private cfg = CONFIG.weapons;
 
   constructor(private racers: Racer[]) {}
@@ -83,6 +89,40 @@ export class Weapons implements Subsystem, WeaponsAPI {
       alive: true,
     });
 
+    // Queue for network broadcast (main drains this each frame).
+    this.pendingFires.push({
+      slot: owner.id,
+      ox: Math.round(spawn.x * 10) / 10,
+      oz: Math.round(spawn.z * 10) / 10,
+      tx: Math.round(tx * 10) / 10,
+      tz: Math.round(tz * 10) / 10,
+    });
+
+    return true;
+  }
+
+  /**
+   * Spawn a remote missile from a network broadcast.  Same visual and
+   * physics as a local fire, but does not deduct stock or broadcast.
+   */
+  spawnRemote(owner: Racer, ox: number, oz: number, tx: number, tz: number): boolean {
+    if (this.active.length >= 64) return false;
+    const spawn = new Vector3(ox, 1, oz);
+    const dir = new Vector3(tx - ox, 0, tz - oz);
+    const len = dir.length();
+    if (len < 0.1) {
+      dir.set(-Math.sin(owner.state.heading), 0, -Math.cos(owner.state.heading));
+    } else {
+      dir.divideScalar(len);
+    }
+    this.active.push({
+      pos: spawn,
+      vel: dir.multiplyScalar(this.cfg.speed),
+      owner,
+      age: 0,
+      armed: false,
+      alive: true,
+    });
     return true;
   }
 
