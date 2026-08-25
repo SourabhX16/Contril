@@ -203,6 +203,16 @@ async function main() {
   const lapsReset = await host.evaluate(() => window.__CONTRIL__.stats().lap === 0);
   check('field reset on restart', lapsReset);
 
+  // ── 4. Procedural track check ───────────────────────────────────────────
+  console.log('▸ procedural track');
+  // Both clients should see the same track length (seeded from the same start msg).
+  const hostLen = await host.evaluate(() => window.__CONTRIL__._game.track.length);
+  const guestLen = await guest.evaluate(() => window.__CONTRIL__._game.track.length);
+  const trackMatch = Math.abs(hostLen - guestLen) < 10;
+  check('track length agrees across clients', trackMatch, `host=${hostLen.toFixed(0)}m guest=${guestLen.toFixed(0)}m`);
+  // Track should be in the expected 2400–3600 m lap range.
+  check('track length in range', hostLen > 2400 && hostLen < 3600, `${hostLen.toFixed(0)}m`);
+
   await browser.close();
   console.log(failures === 0 ? '\nALL CHECKS PASSED' : `\n${failures} CHECK(S) FAILED`);
   process.exit(failures === 0 ? 0 : 1);

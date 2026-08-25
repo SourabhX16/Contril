@@ -25,15 +25,19 @@ Visit **http://localhost:5173** to play locally.
 
 | Action | Keyboard | Gamepad |
 |---|---|---|
-| **Throttle** | `W` / `↑` | RT / A |
+| **Throttle** | `W` / `↑` / `Shift` | RT / A |
 | **Brake / Reverse** | `S` / `↓` | LT |
 | **Steer** | `A` `D` / `←` `→` | Left Stick |
-| **Drift & Boost** | Hold `Shift` / `Space` | B / RB |
+| **Drift & Boost** | Hold `Space` | B / RB |
+| **Fire Missile** | `F` / Left Click | X |
 | **Restart Race** | `R` (on results screen) | — |
 | **Change Camera** | `C` | — |
 | **Back to Menu** | `Esc` (on results screen / lobby) | — |
 
-* **Drift Mechanic:** Hold `Shift` while steering through corners to build up your boost meter (3 tiers). Release for an instant speed burst!
+* **Throttle:** `Shift` and `W`/`↑` both pin the throttle. `Space` is drift-only.
+* **Drift Mechanic:** Hold `Space` while steering through corners to build up your boost meter (3 tiers). Release for an instant speed burst!
+* **Missiles:** Earned every 5 clean checkpoint passes (capped at 3). Aim with the mouse reticle or right stick, fire with `F`/click/X. Missiles travel at 187 km/h, arm after 0.4 s, and create a tidal wave that shoves nearby boats.
+* **Checkpoint Boost:** Cleanly passing through a gate awards a short thrust boost. Consecutive clean passes increase your streak — skip too many gates and you respawn at the last checkpoint.
 
 ---
 
@@ -56,6 +60,10 @@ Online races are peer-to-peer (WebRTC via [Trystero](https://github.com/dmotz/tr
 * Dual-pass cel shading (inverted-hull silhouettes + G-buffer Sobel edges) for crisp, stylised ink outlines.
 * Realistic buoyancy sampled across multiple hull points for dynamic pitch, roll and slam responses.
 * Procedural riders and fully synthesised audio — every mesh, animation and sound is generated in code.
+* **Seeded procedural tracks** — star-polygon circuits generated from a seed, shared across all peers.
+* **Momentum-transfer collisions** — two-body impulse with restitution, mass weighting, and ram-transfer energy.
+* **Missiles & tidal blasts** — fire-and-forget missiles that detonate into a wave pushing nearby hulls.
+* **Three AI archetypes** — rammer (targets humans), shooter (auto-fires ahead), neverdecel (full-throttle chaos).
 
 ---
 
@@ -72,7 +80,7 @@ src/
   render/     cel materials, procedural textures, post stack, sky
   boat/       hull geometry, buoyancy, handling
   rider/      rig + procedural animation
-  race/       spline circuit, gates, lap logic, AI drivers
+  race/       spline circuit, gates, lap logic, AI drivers, weapons, collisions
   net/        P2P session (Trystero), snapshot broadcast/interpolation
   camera/     spring-damped chase rig + harness presets
   ui/         canvas-2D HUD, minimap, screens, title/lobby menu
