@@ -6,7 +6,7 @@
  * — it only knows the interfaces in core/types.
  */
 
-import { Scene, Vector3 } from 'three';
+import { Plane, Raycaster, Scene, Vector2, Vector3 } from 'three';
 import { CONFIG } from './core/config';
 import { InputManager } from './core/input';
 import { clamp } from './core/mathx';
@@ -22,6 +22,7 @@ import { Track, resolveTrackSeed } from './race/track';
 import { BoatPhysics, createRacer } from './boat/boat';
 import { AiDrivers } from './race/ai';
 import { RaceState } from './race/raceState';
+import { Weapons } from './race/weapons';
 import { Riders } from './rider/rider';
 import { ChaseCamera, type CameraPreset } from './camera/chaseCamera';
 import { Hud } from './ui/hud';
@@ -33,6 +34,11 @@ import { Menu } from './ui/menu';
 
 /** Reusable up vector to avoid per-frame allocations in respawn placement. */
 const _up = new Vector3(0, 1, 0);
+/** Reusable raycaster + water plane for missile aim projection. */
+const _raycaster = new Raycaster();
+const _aimNdc = new Vector2();
+const _waterPlane = new Plane(new Vector3(0, 1, 0), 0);
+const _aimPt = new Vector3();
 
 /** Grid names per slot. Humans rename slots 1–3 only by joining them. */
 export const SLOT_NAMES = ['YOU', 'KAIRA', 'NOX', 'PIP'];
@@ -52,6 +58,7 @@ class Game {
   private racers: Racer[] = [];
   private session: NetSession;
   private netSync!: NetSync;
+  private weapons!: Weapons;
   private menu!: Menu;
 
   private ctx: GameContext;
@@ -141,10 +148,13 @@ class Game {
 
     // ── Subsystems, in execution order ──────────────────────────────────────
     const physics = new BoatPhysics(this.racers);
+    this.weapons = new Weapons(this.racers);
+    this.ctx.weapons = this.weapons;
     this.subsystems = [
       this.ocean,
       this.track,
       physics,
+      this.weapons,
       new AiDrivers(this.racers, this.track, physics),
       this.netSync,
       this.race,
@@ -437,6 +447,28 @@ class Game {
       pc.throttle = s.throttle;
       pc.brake = s.brake;
       pc.drift = s.drift;
+
+      // ── Missile fire ──────────────────────────────────────────────────
+      if (s.firePressed && ctx.weapons && ctx.race.phase === 'racing') {
+        const me = ctx.player;
+        let tx: number;
+        let tz: number;
+        if (this.input.hasPointer) {
+          // Mouse / touch: cast a ray from the camera through the pointer NDC
+          // and intersect with the water plane (y ≈ 0).
+          _aimNdc.set(s.aimNx, s.aimNy);
+          _raycaster.setFromCamera(_aimNdc, this.cameraRig.camera);
+          const hit = _raycaster.ray.intersectPlane(_waterPlane, _aimPt);
+          if (hit) { tx = hit.x; tz = hit.z; }
+          else { tx = me.state.position.x - Math.sin(me.state.heading) * 200; tz = me.state.position.z - Math.cos(me.state.heading) * 200; }
+        } else {
+          // Gamepad: aim 200 m ahead along current heading, offset by right stick.
+          const heading = me.state.heading;
+          tx = me.state.position.x - Math.sin(heading) * 200 + s.stickRx * 80;
+          tz = me.state.position.z - Math.cos(heading) * 200 + s.stickRy * 80;
+        }
+        ctx.weapons.fire(me, tx, tz);
+      }
     }
     // (Restart input on the results screen is consumed by the race state
     // machine, which routes it through the network when one is live.)

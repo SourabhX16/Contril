@@ -347,6 +347,10 @@ export class RaceState implements RaceAPI, Subsystem {
       r.checkpointStreak++;
       r.skippedCheckpoints = 0;
       r.state.checkpointBoostTime = CONFIG.race.cpBoostDuration;
+      // Missile award: every `awardEvery` clean passes, load a missile (capped).
+      if (r.checkpointStreak % CONFIG.weapons.awardEvery === 0) {
+        r.missiles = Math.min(r.missiles + 1, CONFIG.weapons.missileCap);
+      }
     } else if (checkpointsPassed > 1) {
       // Multiple non-finish checkpoints in a single frame = gates skipped.
       r.skippedCheckpoints += checkpointsPassed - 1;

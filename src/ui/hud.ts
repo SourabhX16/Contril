@@ -437,6 +437,7 @@ export class Hud implements HudAPI {
       g.restore();
 
       if (st.boostTime > 0) this.drawBoostFrame(s);
+      this.drawWeapons(ctx, s);
       if (p.wrongWay && phase === 'racing') this.drawWrongWay(s);
       g.restore();
     }
@@ -753,7 +754,65 @@ export class Hud implements HudAPI {
     g.restore();
   }
 
-  // ── Top-left: position, lap, clock, splits ─────────────────────────────────
+  // ── Weapons HUD ──────────────────────────────────────────────────────────
+
+  /**
+   * Reticle, missile pips and the checkpoint-boost flash.  Drawn on top of
+   * everything else so the crosshair is always legible.
+   */
+  private drawWeapons(ctx: GameContext, s: number) {
+    const g = this.ctx2d;
+    const p = ctx.player;
+    const wep = ctx.weapons;
+    if (!wep) return;
+
+    // ── Checkpoint-boost flash ────────────────────────────────────────────
+    if (p.state.checkpointBoostTime > 0) {
+      const k = clamp01(p.state.checkpointBoostTime / 0.6); // fast fade-in
+      g.save();
+      g.fillStyle = rgba(HEX.boost, 0.12 * k);
+      g.fillRect(0, 0, this.w, this.h);
+      g.restore();
+    }
+
+    // ── Reticle ───────────────────────────────────────────────────────────
+    if (p.missiles > 0 && ctx.race.phase === 'racing') {
+      const cx = this.w * 0.5;
+      const cy = this.h * 0.52;
+      const r = 14 * s;
+      g.save();
+      g.strokeStyle = rgba(HEX.hudInk, 0.7);
+      g.lineWidth = 1.5 * s;
+      g.beginPath();
+      g.arc(cx, cy, r, 0, Math.PI * 2);
+      g.stroke();
+      // Cross-hairs.
+      const gap = 5 * s;
+      g.beginPath();
+      g.moveTo(cx - r - 4 * s, cy); g.lineTo(cx - gap, cy);
+      g.moveTo(cx + gap, cy);       g.lineTo(cx + r + 4 * s, cy);
+      g.moveTo(cx, cy - r - 4 * s); g.lineTo(cx, cy - gap);
+      g.moveTo(cx, cy + gap);       g.lineTo(cx, cy + r + 4 * s);
+      g.stroke();
+      g.restore();
+    }
+
+    // ── Missile pips ──────────────────────────────────────────────────────
+    if (p.missiles > 0) {
+      const pipR = 4.5 * s;
+      const gap = 12 * s;
+      const bx = this.L.gx; // anchor near the speedometer
+      const by = this.L.gy - this.L.gr - 18 * s;
+      g.save();
+      for (let i = 0; i < p.missiles; i++) {
+        g.beginPath();
+        g.arc(bx + (i - (p.missiles - 1) / 2) * gap, by, pipR, 0, Math.PI * 2);
+        g.fillStyle = rgba(HEX.hudInk, 0.85);
+        g.fill();
+      }
+      g.restore();
+    }
+  }
 
   private drawInfoSlab(ctx: GameContext, s: number) {
     const g = this.ctx2d;

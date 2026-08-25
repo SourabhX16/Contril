@@ -96,6 +96,14 @@ export class InputManager {
     this.down.clear();
     this.mouseDown = false;
   };
+  /**
+   * True when a mouse or touch is the primary aim device (no gamepad
+   * connected).  The weapons subsystem uses this to choose between a
+   * pointer raycast and a gamepad right-stick offset.
+   */
+  get hasPointer(): boolean {
+    return !navigator.getGamepads?.().some((g) => g && g.connected);
+  }
   private onPointerMove = (ev: Event) => {
     const e = ev as PointerEvent;
     // Normalised device coordinates for the aim raycast.
