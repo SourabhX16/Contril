@@ -190,6 +190,8 @@ interface Brain {
   recover: number;
 }
 
+import { BoatPhysics } from '../boat/boatPhysics';
+
 export class AiDrivers implements Subsystem {
   readonly name = 'ai';
   readonly order = 40;
@@ -199,6 +201,7 @@ export class AiDrivers implements Subsystem {
   constructor(
     private racers: Racer[],
     private trk: Track,
+    private physics: BoatPhysics,
   ) {
     let seed = 0xa11ce;
     for (const r of racers) {

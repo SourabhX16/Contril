@@ -179,6 +179,14 @@ export class BoatPhysics implements Subsystem {
 
   private internals = new Map<number, Internal>();
 
+  /**
+   * Who hit whom this frame.  Cleared at the start of each `resolveCollisions`
+   * call so AI drivers see only the current frame's contacts.  Read by
+   * `AiDrivers` after physics runs (order 40 > 30) to trigger archetype-specific
+   * reactions — the rammer's post-collision cooldown, for example.
+   */
+  readonly collisions = new Map<number, Set<number>>();
+
   constructor(private racers: Racer[]) {
     for (const r of racers) this.internals.set(r.id, makeInternal());
   }
@@ -605,18 +613,25 @@ export class BoatPhysics implements Subsystem {
   /**
    * Boat-vs-boat. Four racers means six pairs and four sphere-pairs each, so
    * twenty-four distance tests per frame — a spatial structure here would be
-   * pure ceremony. Resolution is a positional split plus an elastic-ish impulse
-   * along the contact normal, and a yaw kick proportional to the moment arm so
-   * a stern-quarter hit spins you the way it should.
+   * pure ceremony. Resolution is a positional split plus a proper two-body
+   * impulse along the contact normal, with inverse-mass weighting so the
+   * lighter side moves more (or in the case of a remote hull with invMass = 0,
+   * the entire impulse goes into the local side — the remote never shifts).
    *
-   * Remote hulls count as infinite mass: they never move here (the snapshot
-   * stream owns their transform), so any correction or impulse goes entirely
-   * into the locally-simulated side.
+   * A "ram transfer" term hands an additional impulse to the *slower* hull
+   * along the *faster* hull's travel direction, as a fraction of closing
+   * speed. This is what makes a T-bone at full tilt launch the victim rather
+   * than just bounce them. Momentum is still conserved — the ram term is just
+   * an asymmetric split of the same impulse magnitude.
    */
   private resolveCollisions(ctx: GameContext) {
     const cfg = CONFIG.boat;
     const r = cfg.collisionRadius;
     const racers = this.racers;
+    const invMass = 1 / cfg.mass;
+
+    // Clear the collision map so AI drivers only see this frame's contacts.
+    this.collisions.clear();
 
     for (let i = 0; i < racers.length; i++) {
       for (let j = i + 1; j < racers.length; j++) {
@@ -653,51 +668,93 @@ export class BoatPhysics implements Subsystem {
             const nz = dz / d;
             const overlap = min - d;
 
-            // Positional split: half each when both sides are simulated, all of
-            // it to the simulated side when the other is network-owned.
-            const wA = simA && simB ? 0.5 : simA ? 1 : 0;
+            // Positional split: inverse-mass weighted. A remote hull has
+            // invMass = 0 so it absorbs none of the positional correction.
+            const wA = simA ? (simB ? 0.5 : 1) : 0;
             const wB = 1 - wA;
             A.root.position.x -= nx * overlap * wA;
             A.root.position.z -= nz * overlap * wA;
             B.root.position.x += nx * overlap * wB;
             B.root.position.z += nz * overlap * wB;
 
+            // ── Two-body impulse ────────────────────────────────────────
             const rvx = B.state.velocity.x - A.state.velocity.x;
             const rvz = B.state.velocity.z - A.state.velocity.z;
             const closing = rvx * nx + rvz * nz;
-            if (closing < 0) {
-              // Equal-mass impulse is halved between two simulated hulls; a
-              // remote hull acts as a wall and takes the full hit locally.
-              const jimp = -(1 + cfg.collisionRestitution) * closing * (simA && simB ? 0.5 : 1);
-              if (simA) {
-                A.state.velocity.x -= nx * jimp;
-                A.state.velocity.z -= nz * jimp;
-              }
-              if (simB) {
-                B.state.velocity.x += nx * jimp;
-                B.state.velocity.z += nz * jimp;
-              }
+            if (closing >= 0) continue; // separating
 
-              // Yaw kick from the moment arm of the contact point.
-              const gA = this.internals.get(A.id)!;
-              const gB = this.internals.get(B.id)!;
-              const armA = a === 0 ? 1 : -1;
-              const armB = b === 0 ? 1 : -1;
-              const spin = clamp(-closing * cfg.collisionSpin, 0, 2.2);
-              const sideA = Math.sign(nx * Math.cos(A.state.heading) - nz * Math.sin(A.state.heading));
-              const sideB = Math.sign(nx * Math.cos(B.state.heading) - nz * Math.sin(B.state.heading));
-              if (simA) gA.yawVel += spin * armA * sideA * -1;
-              if (simB) gB.yawVel += spin * armB * sideB;
+            const invA = simA ? invMass : 0;
+            const invB = simB ? invMass : 0;
+            const invSum = invA + invB;
+            if (invSum === 0) continue; // both remote — nothing to do
 
-              for (const racer of [A, B]) {
-                if (racer.remote) continue;
-                const g = this.internals.get(racer.id)!;
-                if (g.hitCooldown > 0) continue;
-                g.hitCooldown = 0.18;
-                const strength = clamp01(-closing / 16);
-                ctx.audio.impact(strength * 0.7);
-                if (racer.isPlayer) ctx.cameraRig.addShake(0.14 + strength * 0.4);
+            // Core elastic impulse.
+            let jimp = -(1 + cfg.collisionRestitution) * closing / invSum;
+
+            // ── Ram transfer ────────────────────────────────────────────
+            // The faster hull transfers a fraction of the closing speed to the
+            // slower hull along the faster hull's own travel direction. Only
+            // fires above a minimum closing threshold so gentle taps are not
+            // amplified.
+            if (closing < -cfg.ramMinClosing) {
+              // Determine which hull is the "rammer" (the one carrying more
+              // speed along the contact normal).
+              const speedA = -(A.state.velocity.x * nx + A.state.velocity.z * nz);
+              const speedB = B.state.velocity.x * nx + B.state.velocity.z * nz;
+              if (speedA > speedB && simB) {
+                // A rams B: transfer along A's forward axis.
+                const ram = cfg.ramTransfer * closing;
+                B.state.velocity.x -= nx * ram * invB;
+                B.state.velocity.z -= nz * ram * invB;
+                A.state.velocity.x += nx * ram * invA;
+                A.state.velocity.z += nz * ram * invA;
+              } else if (simA) {
+                // B rams A.
+                const ram = cfg.ramTransfer * closing;
+                A.state.velocity.x += nx * ram * invA;
+                A.state.velocity.z += nz * ram * invA;
+                B.state.velocity.x -= nx * ram * invB;
+                B.state.velocity.z -= nz * ram * invB;
               }
+            }
+
+            // Apply the core impulse.
+            if (simA) {
+              A.state.velocity.x -= nx * jimp * invA;
+              A.state.velocity.z -= nz * jimp * invA;
+            }
+            if (simB) {
+              B.state.velocity.x += nx * jimp * invB;
+              B.state.velocity.z += nz * jimp * invB;
+            }
+
+            // Record the contact for AI consumption.
+            let setA = this.collisions.get(A.id);
+            if (!setA) { setA = new Set(); this.collisions.set(A.id, setA); }
+            setA.add(B.id);
+            let setB = this.collisions.get(B.id);
+            if (!setB) { setB = new Set(); this.collisions.set(B.id, setB); }
+            setB.add(A.id);
+
+            // Yaw kick from the moment arm of the contact point.
+            const gA = this.internals.get(A.id)!;
+            const gB = this.internals.get(B.id)!;
+            const armA = a === 0 ? 1 : -1;
+            const armB = b === 0 ? 1 : -1;
+            const spin = clamp(-closing * cfg.collisionSpin, 0, 2.2);
+            const sideA = Math.sign(nx * Math.cos(A.state.heading) - nz * Math.sin(A.state.heading));
+            const sideB = Math.sign(nx * Math.cos(B.state.heading) - nz * Math.sin(B.state.heading));
+            if (simA) gA.yawVel += spin * armA * sideA * -1;
+            if (simB) gB.yawVel += spin * armB * sideB;
+
+            for (const racer of [A, B]) {
+              if (racer.remote) continue;
+              const g = this.internals.get(racer.id)!;
+              if (g.hitCooldown > 0) continue;
+              g.hitCooldown = 0.18;
+              const strength = clamp01(-closing / 16);
+              ctx.audio.impact(strength * 0.7);
+              if (racer.isPlayer) ctx.cameraRig.addShake(0.14 + strength * 0.4);
             }
           }
         }

@@ -140,11 +140,12 @@ class Game {
     };
 
     // ── Subsystems, in execution order ──────────────────────────────────────
+    const physics = new BoatPhysics(this.racers);
     this.subsystems = [
       this.ocean,
       this.track,
-      new BoatPhysics(this.racers),
-      new AiDrivers(this.racers, this.track),
+      physics,
+      new AiDrivers(this.racers, this.track, physics),
       this.netSync,
       this.race,
       new Riders(this.racers),
