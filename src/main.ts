@@ -456,26 +456,30 @@ class Game {
       pc.drift = s.drift;
 
       // ── Missile fire ──────────────────────────────────────────────────
-      // Mouse users must be in scope mode (right-click held) to fire.
-      // Keyboard (F) and gamepad (X) fire regardless.
-      const canFireMouse = this.input.hasPointer ? this.input.state.scopeHeld : true;
-      if (s.firePressed && canFireMouse && ctx.weapons && ctx.race.phase === 'racing') {
+      // Left click / F / pad X all fire.  Scoped, the shot goes where the
+      // scope reticle points (a ray from the camera through screen centre);
+      // unscoped it launches straight off the bow.
+      if (s.firePressed && ctx.weapons && ctx.race.phase === 'racing') {
         const me = ctx.player;
+        const heading = me.state.heading;
         let tx: number;
         let tz: number;
-        if (this.input.hasPointer) {
-          // Mouse / touch: cast a ray from the camera through the pointer NDC
-          // and intersect with the water plane (y ≈ 0).
-          _aimNdc.set(s.aimNx, s.aimNy);
+        if (this.input.state.scopeHeld) {
+          _aimNdc.set(0, 0);
           _raycaster.setFromCamera(_aimNdc, this.cameraRig.camera);
           const hit = _raycaster.ray.intersectPlane(_waterPlane, _aimPt);
-          if (hit) { tx = hit.x; tz = hit.z; }
-          else { tx = me.state.position.x - Math.sin(me.state.heading) * 200; tz = me.state.position.z - Math.cos(me.state.heading) * 200; }
+          if (hit) {
+            tx = hit.x;
+            tz = hit.z;
+          } else {
+            // Ray above the horizon: throw toward the horizon point instead.
+            const d = _raycaster.ray.direction;
+            tx = this.cameraRig.camera.position.x + d.x * 300;
+            tz = this.cameraRig.camera.position.z + d.z * 300;
+          }
         } else {
-          // Gamepad: aim 200 m ahead along current heading, offset by right stick.
-          const heading = me.state.heading;
-          tx = me.state.position.x - Math.sin(heading) * 200 + s.stickRx * 80;
-          tz = me.state.position.z - Math.cos(heading) * 200 + s.stickRy * 80;
+          tx = me.state.position.x + Math.sin(heading) * 200 + s.stickRx * 80;
+          tz = me.state.position.z + Math.cos(heading) * 200 + s.stickRy * 80;
         }
         if (ctx.weapons.fire(me, tx, tz)) {
           this.session.broadcastMissile({
@@ -512,11 +516,11 @@ class Game {
       this.cameraRig.applyCinematicOrbit(ctx);
       this.cameraRig.update(ctx);
     } else {
-      // Scope mode: right-click held → camera zooms in, mouse offsets the aim.
+      // Scope mode: right-click held → camera zooms in, mouse rotates the view.
       const scopeHeld = this.input.state.scopeHeld && this.race.phase === 'racing';
       this.cameraRig.setMode(scopeHeld ? 'scope' : 'chase');
       if (scopeHeld) {
-        this.cameraRig.setScopeAim(this.input.state.aimNx, this.input.state.aimNy);
+        this.cameraRig.addScopeLook(this.input.state.lookDx, this.input.state.lookDy);
       }
       this.cameraRig.update(ctx);
     }

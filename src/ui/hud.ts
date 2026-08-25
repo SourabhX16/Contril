@@ -843,17 +843,28 @@ export class Hud implements HudAPI {
     }
 
     // ── Missile pips ──────────────────────────────────────────────────────
-    if (p.missiles > 0) {
+    // Always drawn: filled = loaded stock, outlined = empty slot. Without
+    // the outlines a zero stock reads as "the HUD is missing", which is how
+    // dead triggers got reported as broken firing.
+    {
+      const cap = CONFIG.weapons.missileCap;
       const pipR = 4.5 * s;
       const gap = 12 * s;
       const bx = this.L.gx; // anchor near the speedometer
       const by = this.L.gy - this.L.gr - 18 * s;
       g.save();
-      for (let i = 0; i < p.missiles; i++) {
+      for (let i = 0; i < cap; i++) {
+        const x = bx + (i - (cap - 1) / 2) * gap;
         g.beginPath();
-        g.arc(bx + (i - (p.missiles - 1) / 2) * gap, by, pipR, 0, Math.PI * 2);
-        g.fillStyle = rgba(HEX.hudInk, 0.85);
-        g.fill();
+        g.arc(x, by, pipR, 0, Math.PI * 2);
+        if (i < p.missiles) {
+          g.fillStyle = rgba(HEX.hudInk, 0.85);
+          g.fill();
+        } else {
+          g.strokeStyle = rgba(HEX.hudInk, 0.3);
+          g.lineWidth = 1.2 * s;
+          g.stroke();
+        }
       }
       g.restore();
     }

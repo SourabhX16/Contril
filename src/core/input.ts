@@ -29,6 +29,12 @@ export interface InputState {
   scopeHeld: boolean;
   /** Edge-triggered on right-click down. */
   scopePressed: boolean;
+  /**
+   * Raw mouse movement since the last frame, pixels. Consumed by the scope
+   * camera as yaw/pitch deltas; cleared every update.
+   */
+  lookDx: number;
+  lookDy: number;
   /** Edge-triggered, consumed by the race state machine. */
   startPressed: boolean;
   restartPressed: boolean;
@@ -49,6 +55,8 @@ export function createInputState(): InputState {
     fireHeld: false,
     scopeHeld: false,
     scopePressed: false,
+    lookDx: 0,
+    lookDy: 0,
     startPressed: false,
     restartPressed: false,
     cameraTogglePressed: false,
@@ -78,6 +86,9 @@ export class InputManager {
   private steerSmooth = 0;
   private mouseLeftDown = false;
   private mouseRightDown = false;
+  /** Mouse movement accumulated since the last update(), pixels. */
+  private lookAccX = 0;
+  private lookAccY = 0;
 
   constructor(private target: EventTarget = window) {
     target.addEventListener('keydown', this.onKeyDown);
@@ -104,6 +115,8 @@ export class InputManager {
     this.down.clear();
     this.mouseLeftDown = false;
     this.mouseRightDown = false;
+    this.lookAccX = 0;
+    this.lookAccY = 0;
   };
   /**
    * True when a mouse or touch is the primary aim device (no gamepad
@@ -118,6 +131,9 @@ export class InputManager {
     // Normalised device coordinates for the aim raycast.
     this.state.aimNx = (e.clientX / window.innerWidth) * 2 - 1;
     this.state.aimNy = -(e.clientY / window.innerHeight) * 2 + 1;
+    // Raw deltas for the scope camera's free-look.
+    this.lookAccX += e.movementX ?? 0;
+    this.lookAccY += e.movementY ?? 0;
   };
   private onPointerDown = (ev: Event) => {
     const btn = (ev as PointerEvent).button;
@@ -199,6 +215,14 @@ export class InputManager {
       this.anyPressed(['MouseLeft']) ||
       !!(pad && pad.buttons[2]?.pressed);
     s.fireHeld = this.any(KEYS.fire) || this.mouseLeftDown || !!(pad && pad.buttons[2]?.pressed);
+
+    // Hand this frame's accumulated mouse movement to the state, then start
+    // a fresh accumulation. Consumers (the scope camera) read it after
+    // update() in the same frame.
+    s.lookDx = this.lookAccX;
+    s.lookDy = this.lookAccY;
+    this.lookAccX = 0;
+    this.lookAccY = 0;
 
     this.pressedThisFrame.clear();
   }

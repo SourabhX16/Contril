@@ -75,7 +75,7 @@ export class Weapons implements Subsystem, WeaponsAPI {
     const len = dir.length();
     if (len < 0.1) {
       // Target is on top of us — fire straight ahead.
-      dir.set(-Math.sin(s.heading), 0, -Math.cos(s.heading));
+      dir.set(Math.sin(s.heading), 0, Math.cos(s.heading));
     } else {
       dir.divideScalar(len);
     }

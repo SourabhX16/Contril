@@ -36,7 +36,7 @@ Visit **http://localhost:5173** to play locally.
 | **Back to Menu** | `Esc` (on results screen / lobby) | — |
 
 * **Throttle:** `Shift` and `W`/`↑` both pin the throttle. `Space` is drift-only.
-* **Scope & Fire:** Hold `Right Click` to enter scope mode — the camera zooms in and the mouse controls the aiming reticle. While scoped, `Left Click` fires a missile. `F` and gamepad `X` fire without needing scope.
+* **Scope & Fire:** Hold `Right Click` to scope in — the camera zooms and the mouse freely rotates your aim (yaw/pitch) around the boat. `Left Click` fires along the centre reticle; unscoped, `Left Click` / `F` / gamepad `X` fire straight off the bow.
 * **Drift Mechanic:** Hold `Space` while steering through corners to build up your boost meter (3 tiers). Release for an instant speed burst!
 * **Missiles:** Earned every 5 clean checkpoint passes (capped at 3). Aim with the scope, fire with `Left Click`/`F`/`X`. Missiles travel at 187 km/h, arm after 0.4 s, and create a tidal wave that shoves nearby boats.
 * **Checkpoint Boost:** Cleanly passing through a gate awards a short thrust boost. Consecutive clean passes increase your streak — skip too many gates and you respawn at the last checkpoint.

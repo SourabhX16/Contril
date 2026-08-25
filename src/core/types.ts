@@ -222,8 +222,11 @@ export interface CameraRig {
   /** Used by the harness and the countdown/results cinematics. */
   setMode(mode: 'chase' | 'orbit' | 'cinematic' | 'far' | 'bow' | 'scope'): void;
   snapToTarget(): void;
-  /** Set mouse NDC for scope aim offset. */
-  setScopeAim(nx: number, ny: number): void;
+  /**
+   * Feed raw mouse deltas (pixels since last frame) that rotate the scope
+   * view — yaw from dx, pitch from dy. Ignored outside scope mode.
+   */
+  addScopeLook(dx: number, dy: number): void;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
