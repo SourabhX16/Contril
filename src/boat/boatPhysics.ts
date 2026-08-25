@@ -363,6 +363,11 @@ export class BoatPhysics implements Subsystem {
     // A propeller in air does nothing; a propeller in a trough does everything.
     const bite = inAir ? cfg.airThrust : 0.45 + 0.55 * clamp01(submergedFrac * 1.6);
     let accel = g.engine * (cfg.thrust / cfg.mass) * bite;
+    // Checkpoint reward: extra thrust for a clean gate pass (2.4 s duration).
+    if (s.checkpointBoostTime > 0) {
+      s.checkpointBoostTime = Math.max(0, s.checkpointBoostTime - dt);
+      accel *= CONFIG.race.cpThrustMul;
+    }
     if (boosting) accel += (cfg.boostForce / cfg.mass) * (inAir ? cfg.airThrust : 1);
     accel -= clamp01(c.brake) * (cfg.reverseThrust / cfg.mass) * (inAir ? 0 : 1);
 

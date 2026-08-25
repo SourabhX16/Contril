@@ -31,6 +31,9 @@ import { FALLBACK_SEED } from './race/track';
 import { NetSync } from './net/netSync';
 import { Menu } from './ui/menu';
 
+/** Reusable up vector to avoid per-frame allocations in respawn placement. */
+const _up = new Vector3(0, 1, 0);
+
 /** Grid names per slot. Humans rename slots 1–3 only by joining them. */
 export const SLOT_NAMES = ['YOU', 'KAIRA', 'NOX', 'PIP'];
 
@@ -155,6 +158,22 @@ class Game {
       this.session.broadcastStart(cd, this.trackSeed);
       this.beginNetRace({ cd, seed: this.trackSeed });
       return true;
+    };
+
+    // Skip-penalty respawn: teleport the racer to their last completed
+    // checkpoint, facing forward, speed zeroed. Works for both player and AI.
+    this.race.onRespawnRequest = (racer) => {
+      const cps = this.track.checkpoints;
+      const idx = racer.nextCheckpoint > 0
+        ? (racer.nextCheckpoint - 1 + cps.length) % cps.length
+        : cps.length - 1;
+      const s = cps[idx].s;
+      const p = this.track.sample(s / this.track.length);
+      racer.root.position.set(p.position.x, p.position.y + 0.35, p.position.z);
+      racer.root.quaternion.setFromAxisAngle(_up, Math.atan2(p.tangent.x, p.tangent.z));
+      racer.state.velocity.set(0, 0, 0);
+      racer.state.heading = Math.atan2(p.tangent.x, p.tangent.z);
+      racer.state.checkpointBoostTime = 0;
     };
 
     // ── Menu ────────────────────────────────────────────────────────────────
