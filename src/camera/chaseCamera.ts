@@ -34,7 +34,7 @@ import { CONFIG } from '../core/config';
 import { clamp, clamp01, damp, dampAngle } from '../core/mathx';
 import type { CameraRig, GameContext } from '../core/types';
 
-export type CameraMode = 'chase' | 'orbit' | 'cinematic' | 'far' | 'bow';
+export type CameraMode = 'chase' | 'orbit' | 'cinematic' | 'far' | 'bow' | 'scope';
 
 /** Fixed rigs the harness can request by name. */
 export type CameraPreset =
@@ -126,6 +126,9 @@ export class ChaseCamera implements CameraRig {
    */
   private cinematicFrame = -1;
   private snapNext = true;
+  /** Scope mode mouse offset, normalised −1…1. */
+  private scopeNx = 0;
+  private scopeNy = 0;
 
   constructor(aspect: number) {
     this.camera = new PerspectiveCamera(
@@ -146,6 +149,11 @@ export class ChaseCamera implements CameraRig {
   setPreset(preset: CameraPreset) {
     this.preset = preset === 'auto' ? null : preset;
     if (preset === 'auto') this.mode = 'chase';
+  }
+
+  setScopeAim(nx: number, ny: number) {
+    this.scopeNx = nx;
+    this.scopeNy = ny;
   }
 
   addShake(amount: number) {
@@ -200,6 +208,8 @@ export class ChaseCamera implements CameraRig {
       this.camera.position.copy(_orbitPos);
       this.lookAt.copy(_orbitLook);
       this.roll = damp(this.roll, 0, 4, dt);
+    } else if (this.mode === 'scope') {
+      this.applyScope(ctx, _target);
     } else {
       this.applyChase(ctx, _target);
     }
@@ -214,14 +224,17 @@ export class ChaseCamera implements CameraRig {
     this.fovPunch = damp(this.fovPunch, 0, 6.5, dt);
 
     const boosting = s.boostTime > 0 ? 1 : 0;
+    // Scope mode: lock to a narrow 28° FOV for precision aiming.
+    const scopeFov = this.mode === 'scope' ? 28 : 0;
     const targetFov =
-      this.baseFov +
+      scopeFov ||
+      (this.baseFov +
       CONFIG.render.fovSpeedKick * s.speedFrac +
       boosting * 6.5 +
       this.fovPunch +
       // A landing throws the frame open for a beat. Unlike a shake this survives
       // a screenshot.
-      this.landKick * 9;
+      this.landKick * 9);
     this.camera.fov = damp(this.camera.fov, targetFov, 5.5, dt);
     this.camera.updateProjectionMatrix();
 
@@ -345,6 +358,49 @@ export class ChaseCamera implements CameraRig {
     // only part of a landing that survives a screenshot.
     const cap = 0.075 + this.landKick * 0.065;
     this.roll = damp(this.roll, clamp(rollTarget, -cap, cap), 4.6, dt);
+  }
+
+  /**
+   * Scope camera: sits behind and above the hull, offset laterally and
+   * vertically by the mouse NDC so the player can aim the reticle.  The boat
+   * stays centred-ish; the mouse offset shifts the camera around it.
+   */
+  private applyScope(ctx: GameContext, target: Vector3) {
+    const { dt } = ctx;
+    const s = ctx.player.state;
+    const heading = s.heading;
+
+    // Fixed distance behind the boat — closer than chase for the zoom feel.
+    const dist = 7;
+    const height = 3.5;
+
+    // Mouse offset maps to lateral and vertical camera displacement.
+    const lateralOffset = this.scopeNx * 4;   // ±4 m side-to-side
+    const verticalOffset = this.scopeNy * 2;  // ±2 m up/down
+
+    const rightX = Math.cos(heading);
+    const rightZ = -Math.sin(heading);
+
+    _desired.set(
+      target.x - Math.sin(heading) * dist + rightX * lateralOffset,
+      target.y + height + verticalOffset,
+      target.z - Math.cos(heading) * dist + rightZ * lateralOffset,
+    );
+
+    if (this.snapNext) this.camera.position.copy(_desired);
+    else this.smoothFollow(_desired, 14, dt);
+
+    // Look at the boat, slightly ahead.
+    _look.set(
+      target.x + Math.sin(heading) * 3,
+      target.y + 0.6,
+      target.z + Math.cos(heading) * 3,
+    );
+    if (this.snapNext) this.lookAt.copy(_look);
+    else this.lookAt.lerp(_look, 1 - Math.exp(-10 * dt));
+
+    // No dutch tilt in scope mode — the crosshair must stay level.
+    this.roll = damp(this.roll, 0, 8, dt);
   }
 
   private smoothFollow(desired: Vector3, stiffness: number, dt: number) {

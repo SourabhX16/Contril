@@ -456,7 +456,10 @@ class Game {
       pc.drift = s.drift;
 
       // ── Missile fire ──────────────────────────────────────────────────
-      if (s.firePressed && ctx.weapons && ctx.race.phase === 'racing') {
+      // Mouse users must be in scope mode (right-click held) to fire.
+      // Keyboard (F) and gamepad (X) fire regardless.
+      const canFireMouse = this.input.hasPointer ? this.input.state.scopeHeld : true;
+      if (s.firePressed && canFireMouse && ctx.weapons && ctx.race.phase === 'racing') {
         const me = ctx.player;
         let tx: number;
         let tz: number;
@@ -509,6 +512,12 @@ class Game {
       this.cameraRig.applyCinematicOrbit(ctx);
       this.cameraRig.update(ctx);
     } else {
+      // Scope mode: right-click held → camera zooms in, mouse offsets the aim.
+      const scopeHeld = this.input.state.scopeHeld && this.race.phase === 'racing';
+      this.cameraRig.setMode(scopeHeld ? 'scope' : 'chase');
+      if (scopeHeld) {
+        this.cameraRig.setScopeAim(this.input.state.aimNx, this.input.state.aimNy);
+      }
       this.cameraRig.update(ctx);
     }
     this.audio.update(ctx);

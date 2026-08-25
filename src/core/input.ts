@@ -25,6 +25,10 @@ export interface InputState {
   /** Edge + level of the missile-fire action (F / left mouse / pad X). */
   firePressed: boolean;
   fireHeld: boolean;
+  /** True while right mouse button is held — the player is in scope/aim mode. */
+  scopeHeld: boolean;
+  /** Edge-triggered on right-click down. */
+  scopePressed: boolean;
   /** Edge-triggered, consumed by the race state machine. */
   startPressed: boolean;
   restartPressed: boolean;
@@ -43,6 +47,8 @@ export function createInputState(): InputState {
     stickRy: 0,
     firePressed: false,
     fireHeld: false,
+    scopeHeld: false,
+    scopePressed: false,
     startPressed: false,
     restartPressed: false,
     cameraTogglePressed: false,
@@ -70,7 +76,8 @@ export class InputManager {
   private pressedThisFrame = new Set<string>();
   /** Smoothed analogue steer so keyboard input doesn't feel binary. */
   private steerSmooth = 0;
-  private mouseDown = false;
+  private mouseLeftDown = false;
+  private mouseRightDown = false;
 
   constructor(private target: EventTarget = window) {
     target.addEventListener('keydown', this.onKeyDown);
@@ -79,6 +86,7 @@ export class InputManager {
     target.addEventListener('pointermove', this.onPointerMove);
     target.addEventListener('pointerdown', this.onPointerDown);
     target.addEventListener('pointerup', this.onPointerUp);
+    target.addEventListener('contextmenu', this.onContextMenu);
   }
 
   private onKeyDown = (ev: Event) => {
@@ -94,7 +102,8 @@ export class InputManager {
   };
   private onBlur = () => {
     this.down.clear();
-    this.mouseDown = false;
+    this.mouseLeftDown = false;
+    this.mouseRightDown = false;
   };
   /**
    * True when a mouse or touch is the primary aim device (no gamepad
@@ -111,13 +120,23 @@ export class InputManager {
     this.state.aimNy = -(e.clientY / window.innerHeight) * 2 + 1;
   };
   private onPointerDown = (ev: Event) => {
-    if ((ev as PointerEvent).button !== 0) return;
-    this.mouseDown = true;
-    this.pressedThisFrame.add('MouseLeft');
+    const btn = (ev as PointerEvent).button;
+    if (btn === 0) {
+      this.mouseLeftDown = true;
+      this.pressedThisFrame.add('MouseLeft');
+    } else if (btn === 2) {
+      this.mouseRightDown = true;
+      this.pressedThisFrame.add('MouseRight');
+    }
   };
   private onPointerUp = (ev: Event) => {
-    if ((ev as PointerEvent).button !== 0) return;
-    this.mouseDown = false;
+    const btn = (ev as PointerEvent).button;
+    if (btn === 0) this.mouseLeftDown = false;
+    else if (btn === 2) this.mouseRightDown = false;
+  };
+  /** Suppress the browser context menu on right-click. */
+  private onContextMenu = (ev: Event) => {
+    ev.preventDefault();
   };
 
   private any(list: string[]) {
@@ -159,6 +178,10 @@ export class InputManager {
     s.restartPressed = this.anyPressed(KEYS.restart);
     s.cameraTogglePressed = this.anyPressed(KEYS.camera);
 
+    // ── Scope (right-click hold) ─────────────────────────────────────────
+    s.scopeHeld = this.mouseRightDown || this.any(['MouseRight']);
+    s.scopePressed = this.anyPressed(['MouseRight']);
+
     // ── Weapons ───────────────────────────────────────────────────────────
     if (pad) {
       const rx = pad.axes[2] ?? 0;
@@ -169,11 +192,13 @@ export class InputManager {
       s.stickRx = 0;
       s.stickRy = 0;
     }
+    // Fire = left click (mouse) or F key (keyboard) or X button (gamepad).
+    // Only edge-triggered; the weapons subsystem debounces internally.
     s.firePressed =
       this.anyPressed(KEYS.fire) ||
       this.anyPressed(['MouseLeft']) ||
       !!(pad && pad.buttons[2]?.pressed);
-    s.fireHeld = this.any(KEYS.fire) || this.mouseDown || !!(pad && pad.buttons[2]?.pressed);
+    s.fireHeld = this.any(KEYS.fire) || this.mouseLeftDown || !!(pad && pad.buttons[2]?.pressed);
 
     this.pressedThisFrame.clear();
   }
@@ -185,5 +210,6 @@ export class InputManager {
     this.target.removeEventListener('pointermove', this.onPointerMove);
     this.target.removeEventListener('pointerdown', this.onPointerDown);
     this.target.removeEventListener('pointerup', this.onPointerUp);
+    this.target.removeEventListener('contextmenu', this.onContextMenu);
   }
 }

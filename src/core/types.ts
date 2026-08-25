@@ -220,8 +220,10 @@ export interface CameraRig {
   /** Additive screenshake impulse, 0…1. */
   addShake(amount: number): void;
   /** Used by the harness and the countdown/results cinematics. */
-  setMode(mode: 'chase' | 'orbit' | 'cinematic' | 'far' | 'bow'): void;
+  setMode(mode: 'chase' | 'orbit' | 'cinematic' | 'far' | 'bow' | 'scope'): void;
   snapToTarget(): void;
+  /** Set mouse NDC for scope aim offset. */
+  setScopeAim(nx: number, ny: number): void;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

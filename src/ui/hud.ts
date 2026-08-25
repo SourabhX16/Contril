@@ -757,8 +757,8 @@ export class Hud implements HudAPI {
   // ── Weapons HUD ──────────────────────────────────────────────────────────
 
   /**
-   * Reticle, missile pips and the checkpoint-boost flash.  Drawn on top of
-   * everything else so the crosshair is always legible.
+   * Reticle, missile pips, scope overlay and the checkpoint-boost flash.
+   * Drawn on top of everything else so the crosshair is always legible.
    */
   private drawWeapons(ctx: GameContext, s: number) {
     const g = this.ctx2d;
@@ -775,8 +775,53 @@ export class Hud implements HudAPI {
       g.restore();
     }
 
-    // ── Reticle ───────────────────────────────────────────────────────────
-    if (p.missiles > 0 && ctx.race.phase === 'racing') {
+    const inScope = ctx.input.scopeHeld && ctx.race.phase === 'racing';
+
+    // ── Scope overlay ─────────────────────────────────────────────────────
+    if (inScope) {
+      const cx = this.w * 0.5;
+      const cy = this.h * 0.5;
+      g.save();
+
+      // Vignette: darken the edges so the centre pops.
+      const grad = g.createRadialGradient(cx, cy, this.w * 0.12, cx, cy, this.w * 0.55);
+      grad.addColorStop(0, 'rgba(0,0,0,0)');
+      grad.addColorStop(0.7, 'rgba(0,0,0,0.15)');
+      grad.addColorStop(1, 'rgba(0,0,0,0.55)');
+      g.fillStyle = grad;
+      g.fillRect(0, 0, this.w, this.h);
+
+      // Scope circle.
+      const scopeR = Math.min(this.w, this.h) * 0.28;
+      g.strokeStyle = rgba(HEX.hudInk, 0.5);
+      g.lineWidth = 1.2 * s;
+      g.beginPath();
+      g.arc(cx, cy, scopeR, 0, Math.PI * 2);
+      g.stroke();
+
+      // Cross-hairs inside the scope.
+      const hairLen = scopeR * 0.35;
+      const gap = 6 * s;
+      g.strokeStyle = rgba(HEX.hudInk, 0.8);
+      g.lineWidth = 1.5 * s;
+      g.beginPath();
+      g.moveTo(cx - hairLen, cy); g.lineTo(cx - gap, cy);
+      g.moveTo(cx + gap, cy);     g.lineTo(cx + hairLen, cy);
+      g.moveTo(cx, cy - hairLen); g.lineTo(cx, cy - gap);
+      g.moveTo(cx, cy + gap);     g.lineTo(cx, cy + hairLen);
+      g.stroke();
+
+      // Centre dot.
+      g.fillStyle = rgba(HEX.hudInk, 0.9);
+      g.beginPath();
+      g.arc(cx, cy, 2 * s, 0, Math.PI * 2);
+      g.fill();
+
+      g.restore();
+    }
+
+    // ── Reticle (only when NOT in scope — scope has its own) ─────────────
+    if (!inScope && p.missiles > 0 && ctx.race.phase === 'racing') {
       const cx = this.w * 0.5;
       const cy = this.h * 0.52;
       const r = 14 * s;
