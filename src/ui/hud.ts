@@ -105,6 +105,10 @@ export class Hud implements HudAPI {
     s: 1, gx: 0, gy: 0, gr: 1, rx: 0, ry: 0, rw: 1, rh: 1,
     ix: 0, iy: 0, iw: 1, ih1: 1, ih: 1, bx: 0, by: 0, bw: 1, bh: 1,
   };
+  /** Cached minimap rect so `refreshTrack` can rebake without a full resize. */
+  private mmX = 0;
+  private mmY = 0;
+  private mmSize = 0;
 
   // ── Animation state ────────────────────────────────────────────────────────
   /** Needle and readout lag the physics slightly; a gauge with no inertia looks fake. */
@@ -195,6 +199,23 @@ export class Hud implements HudAPI {
     };
 
     this.minimap.layout(width - 30 * s - map, 22 * s, map);
+    this.mmX = width - 30 * s - map;
+    this.mmY = 22 * s;
+    this.mmSize = map;
+    this.computeChromeRects();
+    this.bakeChrome();
+  }
+
+  /**
+   * The circuit changed under us (procedural regen).  The minimap path, course
+   * ribbon and gate markers are all baked into `chrome`, so the simplest correct
+   * thing is to rerun the layout → chrome pipeline with the same geometry we
+   * already stored during the last `resize`.  Everything else (gauge, standings
+   * position, live layer) is frame-by-frame and needs no reset.
+   */
+  refreshTrack() {
+    if (this.mmSize === 0) return;
+    this.minimap.layout(this.mmX, this.mmY, this.mmSize);
     this.computeChromeRects();
     this.bakeChrome();
   }

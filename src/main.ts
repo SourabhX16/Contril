@@ -18,7 +18,7 @@ import { InkComposer } from './render/composer';
 import { SHARED } from './render/celMaterial';
 import { createSky } from './render/sky';
 import { Ocean } from './water/ocean';
-import { Track } from './race/track';
+import { Track, resolveTrackSeed } from './race/track';
 import { BoatPhysics, createRacer } from './boat/boat';
 import { AiDrivers } from './race/ai';
 import { RaceState } from './race/raceState';
@@ -27,6 +27,7 @@ import { ChaseCamera, type CameraPreset } from './camera/chaseCamera';
 import { Hud } from './ui/hud';
 import { GameAudio } from './audio/audio';
 import { NetSession, type StartMsg } from './net/session';
+import { FALLBACK_SEED } from './race/track';
 import { NetSync } from './net/netSync';
 import { Menu } from './ui/menu';
 
@@ -146,12 +147,13 @@ class Game {
       new Riders(this.racers),
     ].sort((a, b) => a.order - b.order);
 
-    // Restart requests route through the network when one is live.
+    // Restart requests route through the network when one is live. The circuit
+    // is kept across restarts — you rerun the course you just raced.
     this.race.onRestartRequest = () => {
       if (!this.session.active) return false;
       const cd = CONFIG.race.countdownSeconds * 1000;
-      this.session.broadcastStart(cd);
-      this.beginNetRace({ cd });
+      this.session.broadcastStart(cd, this.trackSeed);
+      this.beginNetRace({ cd, seed: this.trackSeed });
       return true;
     };
 
@@ -171,8 +173,10 @@ class Game {
         start: () => {
           if (this.session.role !== 'host') return;
           const cd = CONFIG.race.countdownSeconds * 1000;
-          this.session.broadcastStart(cd);
-          this.beginNetRace({ cd });
+          const seed = this.nextTrackSeed();
+          this.newCircuit(seed);
+          this.session.broadcastStart(cd, seed);
+          this.beginNetRace({ cd, seed });
         },
         leave: () => void this.backToMenu(),
       },
@@ -271,6 +275,7 @@ class Game {
 
   /** Classic single-player: slot 0 is you, slots 1–3 are the AI field. */
   private startSolo() {
+    this.newCircuit();
     for (const r of this.racers) {
       r.isPlayer = r.id === 0;
       r.remote = false;
@@ -282,8 +287,41 @@ class Game {
     this.race.paused = false;
   }
 
+  // ── Procedural circuits ────────────────────────────────────────────────────
+
+  /** Seed of the circuit currently built. Shared over the network per race. */
+  trackSeed = FALLBACK_SEED;
+
+  /**
+   * Build a fresh circuit in place and rebake the minimap.
+   *
+   * ?seed= wins (the harness depends on it); the harness otherwise falls back
+   * to a fixed default so captured frames stay reproducible; a human solo race
+   * draws a new seed every time, which is the point of generating tracks at all.
+   */
+  private nextTrackSeed(): number {
+    return (
+      resolveTrackSeed() ??
+      (CONFIG.debug.harness
+        ? FALLBACK_SEED
+        : Math.floor(Math.random() * 2 ** 32) >>> 0)
+    );
+  }
+
+  private newCircuit(seed: number = this.nextTrackSeed()) {
+    this.trackSeed = seed;
+    this.track.regenerate(seed);
+    this.hud.refreshTrack();
+    // Grid marks come from the new centreline; everyone re-seats on it.
+    this.resetRacers();
+  }
+
   /** A start (or restart) message arrived — or the host just sent one. */
   private beginNetRace(msg: StartMsg) {
+    // The host's seed defines the circuit; guests rebuild before anyone moves.
+    if (typeof msg.seed === 'number' && msg.seed !== this.trackSeed) {
+      this.newCircuit(msg.seed >>> 0);
+    }
     this.applyRoster();
     this.netSync.reset();
     this.session.raceRunning = true;

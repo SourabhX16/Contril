@@ -52,6 +52,12 @@ export type RosterMsg = {
 export type StartMsg = {
   /** Milliseconds until the green light, counted from receipt. */
   cd: number;
+  /**
+   * Seed of the procedural circuit. Every client regenerates the identical
+   * track from this one number — the only way a generated course can be shared
+   * without shipping geometry.
+   */
+  seed?: number;
   /** Roster snapshot so mid-race joiners can start cold. */
   players?: LobbyPlayer[];
 };
@@ -162,10 +168,10 @@ export class NetSession {
   }
 
   /** Anyone may start a race or restart a finished one. */
-  broadcastStart(cd: number): void {
+  broadcastStart(cd: number, seed?: number): void {
     const players =
       this.role === 'host' ? this.roster : undefined;
-    void this.sendStart?.({ cd, players });
+    void this.sendStart?.({ cd, seed, players });
   }
 
   broadcastState(snap: BoatSnap): void {
