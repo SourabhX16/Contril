@@ -225,6 +225,7 @@ class Game {
       r.state.boostMeter = 0;
       r.state.driftCharge = 0;
       r.state.driftTier = 0;
+      r.state.checkpointBoostTime = 0;
       r.lap = 0;
       r.nextCheckpoint = 0;
       r.progress = 0;
@@ -234,6 +235,9 @@ class Game {
       r.lapTimes = [];
       r.bestLap = Infinity;
       r.wrongWay = false;
+      r.missiles = 0;
+      r.checkpointStreak = 0;
+      r.skippedCheckpoints = 0;
     }
     // Remote snapshots describe the *previous* race; drop them so remote boats
     // hold their grid marks until fresh frames arrive.

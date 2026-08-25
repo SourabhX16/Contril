@@ -629,6 +629,44 @@ export class GameAudio implements AudioAPI {
     }
   }
 
+  /**
+   * Missile detonation: a sub-heavy body thump, a long lowpassed noise wash
+   * (the "water thud" of a blast on the sea rather than in air) and a bright
+   * spray crack on the attack. Distance is folded into `strength` by the
+   * caller — a hit you are inside of should feel like one.
+   */
+  explosion(strength: number) {
+    const ac = this.ac;
+    if (!ac || this.muted) return;
+    const now = ac.currentTime;
+    const s = clamp01(strength);
+
+    // Body: sine dropping through an octave and a half, longer than impact().
+    const osc = ac.createOscillator();
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(120 + s * 60, now);
+    osc.frequency.exponentialRampToValueAtTime(26, now + 0.85);
+    const g = ac.createGain();
+    g.gain.setValueAtTime(0.0001, now);
+    g.gain.exponentialRampToValueAtTime(0.6 * s + 0.08, now + 0.012);
+    g.gain.exponentialRampToValueAtTime(0.0001, now + 1.05);
+    osc.connect(g).connect(this.sfxBus);
+    osc.start(now);
+    osc.stop(now + 1.1);
+
+    // The wash: lowpass noise, slow sweep down, the bulk of the energy.
+    this.burst(
+      ac,
+      now,
+      0.9 + s * 0.5,
+      { type: 'lowpass', from: 2400 - s * 1200, to: 90, q: 0.6 },
+      0.42 * s + 0.06,
+      this.sfxBus,
+    );
+    // Attack crack.
+    this.burst(ac, now, 0.12, { type: 'highpass', from: 3200, to: 1400, q: 0.7 }, 0.22 * s, this.sfxBus);
+  }
+
   // ───────────────────────────────────────────────────────────────────────────
   // Self-test
   // ───────────────────────────────────────────────────────────────────────────
