@@ -25,6 +25,7 @@
  * window to a retina 1440p capture without a media query.
  */
 
+import { Vector3 } from 'three';
 import { CONFIG } from '../core/config';
 import { HEX } from '../core/palette';
 import { clamp, clamp01, damp, formatTime, ordinal } from '../core/mathx';
@@ -867,6 +868,44 @@ export class Hud implements HudAPI {
         }
       }
       g.restore();
+    }
+
+    // ── Active missile tracking arrows ─────────────────────────────────
+    // Project each of the player's live missiles to screen and draw a
+    // small chevron pointing at them so the player can track where they're
+    // going.
+    {
+      const cam = ctx.cameraRig.camera;
+      const hw = this.w * 0.5;
+      const hh = this.h * 0.5;
+      const _mv = new Vector3();
+      for (const m of wep.active) {
+        if (!m.alive || m.owner !== p) continue;
+        _mv.set(m.pos.x, m.pos.y, m.pos.z);
+        _mv.project(cam);
+        // Behind the camera or off-screen: skip.
+        if (_mv.z > 1) continue;
+        const sx = (_mv.x * hw) + hw;
+        const sy = (-_mv.y * hh) + hh;
+        if (sx < -20 || sx > this.w + 20 || sy < -20 || sy > this.h + 20) continue;
+        g.save();
+        const a = 8 * s;
+        g.translate(sx, sy);
+        // Point the chevron from the player toward the missile.
+        const dx = sx - hw;
+        const dy = sy - hh;
+        const ang = Math.atan2(dy, dx);
+        g.rotate(ang);
+        g.fillStyle = rgba(HEX.boostHot, 0.85);
+        g.beginPath();
+        g.moveTo(a, 0);
+        g.lineTo(-a * 0.6, -a * 0.5);
+        g.lineTo(-a * 0.3, 0);
+        g.lineTo(-a * 0.6, a * 0.5);
+        g.closePath();
+        g.fill();
+        g.restore();
+      }
     }
   }
 

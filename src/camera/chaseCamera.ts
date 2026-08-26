@@ -64,6 +64,8 @@ const CHASE_HEIGHT_TRIM = 0.44;
  * being twitchy at 28° FOV.
  */
 const SCOPE_LOOK_SENS = 0.0038;
+/** Chase-mode free-look sensitivity, radians per pixel of mouse movement. */
+const FREELOOK_SENS = 0.002;
 /** Scope rig distance behind the hull and base height above it, metres. */
 const SCOPE_DIST = 7;
 const SCOPE_HEIGHT = 2.4;
@@ -143,6 +145,14 @@ export class ChaseCamera implements CameraRig {
    */
   private scopeYaw = 0;
   private scopePitch = 0.28;
+  /**
+   * Chase-mode free-look offsets from the auto-follow yaw. Mouse orbits the
+   * view around the boat; after a moment of rest they ease back to zero so
+   * the rig returns to the racing shot. Pitch offset tilts the look point.
+   */
+  private freeYaw = 0;
+  private freePitch = 0;
+  private lastLookTime = -10;
   /** Mode last frame, to detect the chase→scope transition and reset the look. */
   private lastMode: CameraMode = 'chase';
 
@@ -168,13 +178,21 @@ export class ChaseCamera implements CameraRig {
   }
 
   /**
-   * Rotate the scope view by raw mouse deltas. Yaw follows the heading
-   * convention (positive dx turns the view toward +X); positive dy pitches
-   * down toward the water.
+   * Rotate the view with raw mouse deltas.
+   *
+   * Sign: increasing yaw turns toward +X, which is the boat's LEFT (a hull
+   * facing +Z has its right side at −X), so mouse-right must SUBTRACT from
+   * yaw to pan the view right. Vertical is standard: mouse-down looks down.
    */
-  addScopeLook(dx: number, dy: number) {
-    this.scopeYaw += dx * SCOPE_LOOK_SENS;
-    this.scopePitch = clamp(this.scopePitch + dy * SCOPE_LOOK_SENS, -0.32, 1.05);
+  addLook(dx: number, dy: number) {
+    if (dx !== 0 || dy !== 0) this.lastLookTime = performance.now() / 1000;
+    if (this.mode === 'scope') {
+      this.scopeYaw -= dx * SCOPE_LOOK_SENS;
+      this.scopePitch = clamp(this.scopePitch + dy * SCOPE_LOOK_SENS, -0.32, 1.05);
+    } else {
+      this.freeYaw = clamp(this.freeYaw - dx * FREELOOK_SENS, -Math.PI * 0.75, Math.PI * 0.75);
+      this.freePitch = clamp(this.freePitch + dy * FREELOOK_SENS, -0.4, 0.55);
+    }
   }
 
   addShake(amount: number) {

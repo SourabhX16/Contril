@@ -455,16 +455,21 @@ class Game {
       pc.brake = s.brake;
       pc.drift = s.drift;
 
-      // ── Missile fire ──────────────────────────────────────────────────
-      // Left click / F / pad X all fire.  Scoped, the shot goes where the
-      // scope reticle points (a ray from the camera through screen centre);
-      // unscoped it launches straight off the bow.
+    }
+
+    // ── Missile fire ──────────────────────────────────────────────────
+    // Left click / F / pad X all fire.  Scoped, the shot goes where the
+    // scope reticle points (a ray from the camera through screen centre);
+    // unscoped it launches straight off the bow.
+    // Runs even during forcedControls (riding) so the player can shoot.
+    {
+      const s = this.input.state;
       if (s.firePressed && ctx.weapons && ctx.race.phase === 'racing') {
         const me = ctx.player;
         const heading = me.state.heading;
         let tx: number;
         let tz: number;
-        if (this.input.state.scopeHeld) {
+        if (s.scopeHeld) {
           _aimNdc.set(0, 0);
           _raycaster.setFromCamera(_aimNdc, this.cameraRig.camera);
           const hit = _raycaster.ray.intersectPlane(_waterPlane, _aimPt);
@@ -520,7 +525,7 @@ class Game {
       const scopeHeld = this.input.state.scopeHeld && this.race.phase === 'racing';
       this.cameraRig.setMode(scopeHeld ? 'scope' : 'chase');
       if (scopeHeld) {
-        this.cameraRig.addScopeLook(this.input.state.lookDx, this.input.state.lookDy);
+        this.cameraRig.addLook(this.input.state.lookDx, this.input.state.lookDy);
       }
       this.cameraRig.update(ctx);
     }

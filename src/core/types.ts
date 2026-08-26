@@ -171,6 +171,8 @@ export interface WeaponsAPI {
    * of the owner's stock; returns false when they have none.
    */
   fire(owner: Racer, tx: number, tz: number): boolean;
+  /** Live missiles, exposed so the HUD can draw tracking indicators. */
+  readonly active: { pos: { x: number; y: number; z: number }; owner: Racer; alive: boolean }[];
 }
 
 export interface RaceAPI {
@@ -223,10 +225,11 @@ export interface CameraRig {
   setMode(mode: 'chase' | 'orbit' | 'cinematic' | 'far' | 'bow' | 'scope'): void;
   snapToTarget(): void;
   /**
-   * Feed raw mouse deltas (pixels since last frame) that rotate the scope
-   * view — yaw from dx, pitch from dy. Ignored outside scope mode.
+   * Feed raw mouse deltas (pixels since last frame). In scope mode they
+   * rotate the free-look view; in chase mode they orbit the camera around
+   * the boat (auto-recentering when the mouse rests).
    */
-  addScopeLook(dx: number, dy: number): void;
+  addLook(dx: number, dy: number): void;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
