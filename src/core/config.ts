@@ -42,8 +42,8 @@ export const CONFIG = {
     thrust: 6100,
     reverseThrust: 2600,
     boostForce: 4000,
-    /** Top speed in m/s at full throttle on flat water (~29 m/s ≈ 105 km/h). */
-    topSpeed: 29,
+    /** Top speed in m/s at full throttle on flat water — exactly 100 km/h. */
+    topSpeed: 27.78,
     boostTopSpeed: 39,
     /** Drag = dragLinear·v + dragQuadratic·v|v|, in m/s². */
     dragLinear: 0.18,
@@ -174,7 +174,24 @@ export const CONFIG = {
     // ── Collision ───────────────────────────────────────────────────────────
     /** Radius of each of the two spheres approximating a hull. */
     collisionRadius: 1.0,
-    collisionRestitution: 0.42,
+    /**
+     * Restitution of a hull-to-hull hit. Raised from 0.42 to 0.58 as part of
+     * the momentum model: collisions are solved as a true two-body impulse
+     * (Δp applied equally and oppositely, remote hulls acting as infinite
+     * mass), so a boat carrying more speed along the contact normal shoves the
+     * slower one measurably further than it is itself deflected.
+     */
+    collisionRestitution: 0.58,
+    /**
+     * Ram transfer: extra impulse handed to the *slower* hull along the
+     * faster hull's travel direction, as a fraction of their closing speed.
+     * This is what makes a T-bone at speed launch the victim rather than just
+     * bounce them — and because every newton goes out one bow and in the other,
+     * total momentum is still conserved to the digit.
+     */
+    ramTransfer: 0.4,
+    /** Closing speed below which the ram term does not fire, m/s. */
+    ramMinClosing: 5,
     /** Yaw impulse per m/s of closing speed. */
     collisionSpin: 0.055,
   },
@@ -187,6 +204,51 @@ export const CONFIG = {
     gateRadius: 17,
     /** Dot product below this against track forward = going the wrong way. */
     wrongWayDot: -0.35,
+
+    // ── Checkpoint reward & penalty ────────────────────────────────────────
+    /**
+     * Seconds of boosted thrust granted for passing the checkpoint you were
+     * meant to pass. At `cpThrustMul` the drag curve settles near 34 m/s
+     * (~122 km/h) — visibly above the 100 km/h throttle cap, gone in a beat.
+     */
+    cpBoostDuration: 2.4,
+    /** Thrust multiplier while the checkpoint boost runs. */
+    cpThrustMul: 1.5,
+    /**
+     * Consecutive checkpoints skipped (cutting across open water fires several
+     * gate milestones at once) before the race respawns you at the last one
+     * you passed fairly.
+     */
+    skipLimit: 3,
+  },
+
+  weapons: {
+    /** Missile cruise speed, m/s — fast enough to catch a boosting boat. */
+    speed: 62,
+    /** Metres before an undetonated missile gives up and blasts anyway. */
+    maxRange: 430,
+    /** Seconds after launch before the warhead can arm, owner-safety window. */
+    armDelay: 0.4,
+    /** Direct-blast radius: any hull inside is killed, m. */
+    killRadius: 15,
+    /** Radius of the tidal wave a missed missile throws out, m. */
+    waveRadius: 48,
+    /** Horizontal shove at the wave's epicentre, m/s, linear falloff to zero. */
+    waveImpulse: 13,
+    /** Clean checkpoints covered per missile awarded. */
+    awardEvery: 5,
+    /** Maximum stock per racer. */
+    missileCap: 3,
+    /** Shooter-archetype fire period, s. */
+    shooterCooldown: 9,
+    /**
+     * Deliberate aim error of the shooter archetype, radians. The shot is
+     * dodgeable by construction: at 200 m, 0.10 rad is ~20 m of offset, so a
+     * player who jinks hard inside the flight time clears the blast.
+     */
+    shooterError: 0.1,
+    /** Rammer-archetype cooldown after a successful ram, s. */
+    rammerCooldown: 15,
   },
 
   ai: {

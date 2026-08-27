@@ -62,12 +62,17 @@ export interface BoatState {
   boostTime: number;
   /** 0…1 boost meter for the HUD. */
   boostMeter: number;
+  /** Seconds of checkpoint reward boost remaining (thrust × cpThrustMul). */
+  checkpointBoostTime: number;
   /** Throttle actually applied this frame, post-assist. */
   appliedThrottle: number;
 }
 
-/** Per-racer AI temperament. Tuned so each opponent is recognisable. */
-export type AiPersonality = 'aggressive' | 'clean' | 'erratic';
+/**
+ * Per-racer archetype. Three behaviours, each with a weakness a human can
+ * exploit — see `race/ai.ts` for the driving models.
+ */
+export type AiPersonality = 'rammer' | 'shooter' | 'neverdecel';
 
 export interface Racer {
   readonly id: RacerId;
@@ -102,6 +107,14 @@ export interface Racer {
   lapTimes: number[];
   bestLap: number;
   wrongWay: boolean;
+
+  // Checkpoint economy, owned by the race subsystem.
+  /** Missile stock. Awarded for checkpoint streaks, fastest laps, leading laps. */
+  missiles: number;
+  /** Clean checkpoints in a row — the counter that pays out every awardEvery. */
+  checkpointStreak: number;
+  /** Lifetime count of checkpoints skipped by cutting the course. */
+  skippedCheckpoints: number;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -147,6 +160,21 @@ export interface TrackAPI {
 
 export type RacePhase = 'boot' | 'countdown' | 'racing' | 'finished' | 'results';
 
+/**
+ * The checkpoint economy and missile launcher. Lives on the context so the AI
+ * can fire through the exact same door the player does — an archetype never
+ * touches a hull it does not own.
+ */
+export interface WeaponsAPI {
+  /**
+   * Fire a missile from `owner` toward the world point (tx, tz). Consumes one
+   * of the owner's stock; returns false when they have none.
+   */
+  fire(owner: Racer, tx: number, tz: number): boolean;
+  /** Live missiles, exposed so the HUD can draw tracking indicators. */
+  readonly active: { pos: { x: number; y: number; z: number }; owner: Racer; alive: boolean }[];
+}
+
 export interface RaceAPI {
   phase: RacePhase;
   /** Seconds since the lights went green. Negative during the countdown. */
@@ -177,9 +205,10 @@ export interface AudioAPI {
   impact(strength: number): void;
   splash(strength: number): void;
   horn(pitch: number): void;
-  boost(): void;
-  checkpoint(): void;
-  setMuted(m: boolean): void;
+   boost(): void;
+   checkpoint(): void;
+   explosion(strength: number): void;
+   setMuted(m: boolean): void;
 }
 
 export interface HudAPI {
@@ -193,8 +222,14 @@ export interface CameraRig {
   /** Additive screenshake impulse, 0…1. */
   addShake(amount: number): void;
   /** Used by the harness and the countdown/results cinematics. */
-  setMode(mode: 'chase' | 'orbit' | 'cinematic' | 'far' | 'bow'): void;
+  setMode(mode: 'chase' | 'orbit' | 'cinematic' | 'far' | 'bow' | 'scope'): void;
   snapToTarget(): void;
+  /**
+   * Feed raw mouse deltas (pixels since last frame). In scope mode they
+   * rotate the free-look view; in chase mode they orbit the camera around
+   * the boat (auto-recentering when the mouse rests).
+   */
+  addLook(dx: number, dy: number): void;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -221,6 +256,8 @@ export interface GameContext {
   input: InputState;
   audio: AudioAPI;
   cameraRig: CameraRig;
+  /** Present once the weapons subsystem is registered. */
+  weapons?: WeaponsAPI;
 
   /** Screen size in CSS pixels, and the current device pixel ratio. */
   width: number;

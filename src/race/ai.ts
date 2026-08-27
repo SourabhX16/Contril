@@ -117,7 +117,7 @@ interface Profile {
 }
 
 const PROFILES: Record<string, Profile> = {
-  aggressive: {
+  rammer: {
     pace: 1.005,
     laneBias: -3.6, // lives on the inside, ready to close a door
     reaction: 0.10,
@@ -132,7 +132,7 @@ const PROFILES: Record<string, Profile> = {
     mistakeKinds: [Mistake.Overshoot, Mistake.Overshoot, Mistake.WideEntry],
     driftAt: 0.34,
   },
-  clean: {
+  shooter: {
     pace: 0.99,
     laneBias: 0.5, // the benchmark: on the line, a shade to the right of it
     reaction: 0.34,
@@ -147,7 +147,7 @@ const PROFILES: Record<string, Profile> = {
     mistakeKinds: [Mistake.Lift],
     driftAt: 0.5,
   },
-  erratic: {
+  neverdecel: {
     pace: 1.0,
     laneBias: 3.9, // sits out wide and drifts about out there
     reaction: 0.26,
@@ -188,7 +188,13 @@ interface Brain {
   /** Seconds with no forward speed, and the reverse-out timer. */
   stuck: number;
   recover: number;
+  /** Rammer collision cooldown — seconds since last collision with a human. */
+  collisionCooldown: number;
+  /** Shooter fire cooldown — seconds until the next auto-fire. */
+  fireCooldown: number;
 }
+
+import { BoatPhysics } from '../boat/boatPhysics';
 
 export class AiDrivers implements Subsystem {
   readonly name = 'ai';
@@ -199,13 +205,14 @@ export class AiDrivers implements Subsystem {
   constructor(
     private racers: Racer[],
     private trk: Track,
+    private physics: BoatPhysics,
   ) {
     let seed = 0xa11ce;
     for (const r of racers) {
       // A brain per slot, including the player's: in multiplayer any slot can
       // lose its human (they leave mid-race), and the boat must fall back to
       // an AI driver without rebuilding anything.
-      const profile = PROFILES[r.personality ?? 'clean'] ?? PROFILES.clean;
+      const profile = PROFILES[r.personality ?? 'shooter'] ?? PROFILES.shooter;
       seed = (seed * 1664525 + 1013904223) >>> 0;
       const rng = new Rng(seed);
       this.brains.set(r.id, {
@@ -226,14 +233,35 @@ export class AiDrivers implements Subsystem {
         driftHold: 0,
         stuck: 0,
         recover: 0,
+        collisionCooldown: 0,
+        fireCooldown: rng.range(2, CONFIG.weapons.shooterCooldown),
       });
     }
   }
 
   update(ctx: GameContext) {
     if (ctx.race.paused) return;
+    const dt = ctx.dt;
     for (const r of this.racers) {
       if (r.isPlayer || r.remote) continue;
+      const b = this.brains.get(r.id)!;
+      if (b.collisionCooldown > 0) b.collisionCooldown -= dt;
+      if (b.fireCooldown > 0) b.fireCooldown -= dt;
+
+      // Rammer: check collision map for impacts with a human.
+      if (r.personality === 'rammer' && b.collisionCooldown <= 0) {
+        const hits = this.physics.collisions.get(r.id);
+        if (hits) {
+          for (const otherId of hits) {
+            const other = this.racers.find((x) => x.id === otherId);
+            if (other?.isPlayer) {
+              b.collisionCooldown = CONFIG.weapons.rammerCooldown;
+              break;
+            }
+          }
+        }
+      }
+
       this.drive(ctx, r);
     }
   }
@@ -359,6 +387,81 @@ export class AiDrivers implements Subsystem {
       _preview.distance < 26;
     b.driftHold = canDrift ? 0.45 : Math.max(0, b.driftHold - dt);
     c.drift = b.driftHold > 0;
+
+    // ── Archetype: rammer ──────────────────────────────────────────────────
+    // After a collision, the rammer gains a temporary speed boost and steers
+    // aggressively toward the nearest human for `rammerCooldown` seconds.
+    const pName = r.personality ?? 'shooter';
+    if (pName === 'rammer' && b.collisionCooldown > 0) {
+      const human = this.nearestHuman(ctx, r);
+      if (human) {
+        const hx = human.root.position.x;
+        const hz = human.root.position.z;
+        const intercept = Math.atan2(hx - r.root.position.x, hz - r.root.position.z);
+        c.steer = clamp(angleDelta(r.state.heading, intercept) * 1.8, -1, 1);
+        c.throttle = 1;
+        c.brake = 0;
+      }
+    }
+
+    // ── Archetype: neverdecel ──────────────────────────────────────────────
+    // Throttle is always pinned; the boat never brakes.  Corners are taken at
+    // full speed — the driver either makes it or ploughs through the wave.
+    if (pName === 'neverdecel') {
+      c.throttle = 1;
+      c.brake = 0;
+    }
+
+    // ── Archetype: shooter ─────────────────────────────────────────────────
+    // Normal racing + auto-fire at the nearest ship in front within a 22° cone.
+    if (pName === 'shooter' && b.fireCooldown <= 0 && ctx.weapons && r.missiles > 0) {
+      const target = this.nearestInCone(ctx, r, 22);
+      if (target) {
+        const tx = target.root.position.x + target.state.velocity.x * 0.3;
+        const tz = target.root.position.z + target.state.velocity.z * 0.3;
+        ctx.weapons.fire(r, tx, tz);
+        b.fireCooldown = CONFIG.weapons.shooterCooldown;
+      }
+    }
+  }
+
+  // ── Archetype helpers ────────────────────────────────────────────────────
+
+  /** Closest human-controlled racer, or null if none. */
+  private nearestHuman(ctx: GameContext, r: Racer): Racer | null {
+    let best: Racer | null = null;
+    let bestDist = Infinity;
+    for (const other of this.racers) {
+      if (!other.isPlayer || other === r) continue;
+      const dx = other.root.position.x - r.root.position.x;
+      const dz = other.root.position.z - r.root.position.z;
+      const d = Math.hypot(dx, dz);
+      if (d < bestDist) { bestDist = d; best = other; }
+    }
+    return best;
+  }
+
+  /**
+   * Closest racer (human or AI) ahead of `r` within a cone of `halfDeg`
+   * degrees, or null.  Used by the shooter archetype to pick a target.
+   */
+  private nearestInCone(ctx: GameContext, r: Racer, halfDeg: number): Racer | null {
+    const cosThreshold = Math.cos((halfDeg * Math.PI) / 180);
+    const hx = Math.sin(r.state.heading);
+    const hz = Math.cos(r.state.heading);
+    let best: Racer | null = null;
+    let bestDist = Infinity;
+    for (const other of this.racers) {
+      if (other === r || other.remote) continue;
+      const dx = other.root.position.x - r.root.position.x;
+      const dz = other.root.position.z - r.root.position.z;
+      const d = Math.hypot(dx, dz);
+      if (d < 4 || d > 120) continue; // too close or too far
+      const dot = (dx * hx + dz * hz) / d; // cos angle between heading and direction
+      if (dot < cosThreshold) continue; // outside the cone
+      if (d < bestDist) { bestDist = d; best = other; }
+    }
+    return best;
   }
 
   // ── Steering ──────────────────────────────────────────────────────────────

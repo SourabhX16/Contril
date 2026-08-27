@@ -25,6 +25,7 @@
  * window to a retina 1440p capture without a media query.
  */
 
+import { Vector3 } from 'three';
 import { CONFIG } from '../core/config';
 import { HEX } from '../core/palette';
 import { clamp, clamp01, damp, formatTime, ordinal } from '../core/mathx';
@@ -105,6 +106,10 @@ export class Hud implements HudAPI {
     s: 1, gx: 0, gy: 0, gr: 1, rx: 0, ry: 0, rw: 1, rh: 1,
     ix: 0, iy: 0, iw: 1, ih1: 1, ih: 1, bx: 0, by: 0, bw: 1, bh: 1,
   };
+  /** Cached minimap rect so `refreshTrack` can rebake without a full resize. */
+  private mmX = 0;
+  private mmY = 0;
+  private mmSize = 0;
 
   // ── Animation state ────────────────────────────────────────────────────────
   /** Needle and readout lag the physics slightly; a gauge with no inertia looks fake. */
@@ -195,6 +200,23 @@ export class Hud implements HudAPI {
     };
 
     this.minimap.layout(width - 30 * s - map, 22 * s, map);
+    this.mmX = width - 30 * s - map;
+    this.mmY = 22 * s;
+    this.mmSize = map;
+    this.computeChromeRects();
+    this.bakeChrome();
+  }
+
+  /**
+   * The circuit changed under us (procedural regen).  The minimap path, course
+   * ribbon and gate markers are all baked into `chrome`, so the simplest correct
+   * thing is to rerun the layout → chrome pipeline with the same geometry we
+   * already stored during the last `resize`.  Everything else (gauge, standings
+   * position, live layer) is frame-by-frame and needs no reset.
+   */
+  refreshTrack() {
+    if (this.mmSize === 0) return;
+    this.minimap.layout(this.mmX, this.mmY, this.mmSize);
     this.computeChromeRects();
     this.bakeChrome();
   }
@@ -416,6 +438,7 @@ export class Hud implements HudAPI {
       g.restore();
 
       if (st.boostTime > 0) this.drawBoostFrame(s);
+      this.drawWeapons(ctx, s);
       if (p.wrongWay && phase === 'racing') this.drawWrongWay(s);
       g.restore();
     }
@@ -732,7 +755,159 @@ export class Hud implements HudAPI {
     g.restore();
   }
 
-  // ── Top-left: position, lap, clock, splits ─────────────────────────────────
+  // ── Weapons HUD ──────────────────────────────────────────────────────────
+
+  /**
+   * Reticle, missile pips, scope overlay and the checkpoint-boost flash.
+   * Drawn on top of everything else so the crosshair is always legible.
+   */
+  private drawWeapons(ctx: GameContext, s: number) {
+    const g = this.ctx2d;
+    const p = ctx.player;
+    const wep = ctx.weapons;
+    if (!wep) return;
+
+    // ── Checkpoint-boost flash ────────────────────────────────────────────
+    if (p.state.checkpointBoostTime > 0) {
+      const k = clamp01(p.state.checkpointBoostTime / 0.6); // fast fade-in
+      g.save();
+      g.fillStyle = rgba(HEX.boost, 0.12 * k);
+      g.fillRect(0, 0, this.w, this.h);
+      g.restore();
+    }
+
+    const inScope = ctx.input.scopeHeld && ctx.race.phase === 'racing';
+
+    // ── Scope overlay ─────────────────────────────────────────────────────
+    if (inScope) {
+      const cx = this.w * 0.5;
+      const cy = this.h * 0.5;
+      g.save();
+
+      // Vignette: darken the edges so the centre pops.
+      const grad = g.createRadialGradient(cx, cy, this.w * 0.12, cx, cy, this.w * 0.55);
+      grad.addColorStop(0, 'rgba(0,0,0,0)');
+      grad.addColorStop(0.7, 'rgba(0,0,0,0.15)');
+      grad.addColorStop(1, 'rgba(0,0,0,0.55)');
+      g.fillStyle = grad;
+      g.fillRect(0, 0, this.w, this.h);
+
+      // Scope circle.
+      const scopeR = Math.min(this.w, this.h) * 0.28;
+      g.strokeStyle = rgba(HEX.hudInk, 0.5);
+      g.lineWidth = 1.2 * s;
+      g.beginPath();
+      g.arc(cx, cy, scopeR, 0, Math.PI * 2);
+      g.stroke();
+
+      // Cross-hairs inside the scope.
+      const hairLen = scopeR * 0.35;
+      const gap = 6 * s;
+      g.strokeStyle = rgba(HEX.hudInk, 0.8);
+      g.lineWidth = 1.5 * s;
+      g.beginPath();
+      g.moveTo(cx - hairLen, cy); g.lineTo(cx - gap, cy);
+      g.moveTo(cx + gap, cy);     g.lineTo(cx + hairLen, cy);
+      g.moveTo(cx, cy - hairLen); g.lineTo(cx, cy - gap);
+      g.moveTo(cx, cy + gap);     g.lineTo(cx, cy + hairLen);
+      g.stroke();
+
+      // Centre dot.
+      g.fillStyle = rgba(HEX.hudInk, 0.9);
+      g.beginPath();
+      g.arc(cx, cy, 2 * s, 0, Math.PI * 2);
+      g.fill();
+
+      g.restore();
+    }
+
+    // ── Reticle (only when NOT in scope — scope has its own) ─────────────
+    if (!inScope && p.missiles > 0 && ctx.race.phase === 'racing') {
+      const cx = this.w * 0.5;
+      const cy = this.h * 0.52;
+      const r = 14 * s;
+      g.save();
+      g.strokeStyle = rgba(HEX.hudInk, 0.7);
+      g.lineWidth = 1.5 * s;
+      g.beginPath();
+      g.arc(cx, cy, r, 0, Math.PI * 2);
+      g.stroke();
+      // Cross-hairs.
+      const gap = 5 * s;
+      g.beginPath();
+      g.moveTo(cx - r - 4 * s, cy); g.lineTo(cx - gap, cy);
+      g.moveTo(cx + gap, cy);       g.lineTo(cx + r + 4 * s, cy);
+      g.moveTo(cx, cy - r - 4 * s); g.lineTo(cx, cy - gap);
+      g.moveTo(cx, cy + gap);       g.lineTo(cx, cy + r + 4 * s);
+      g.stroke();
+      g.restore();
+    }
+
+    // ── Missile pips ──────────────────────────────────────────────────────
+    // Always drawn: filled = loaded stock, outlined = empty slot. Without
+    // the outlines a zero stock reads as "the HUD is missing", which is how
+    // dead triggers got reported as broken firing.
+    {
+      const cap = CONFIG.weapons.missileCap;
+      const pipR = 4.5 * s;
+      const gap = 12 * s;
+      const bx = this.L.gx; // anchor near the speedometer
+      const by = this.L.gy - this.L.gr - 18 * s;
+      g.save();
+      for (let i = 0; i < cap; i++) {
+        const x = bx + (i - (cap - 1) / 2) * gap;
+        g.beginPath();
+        g.arc(x, by, pipR, 0, Math.PI * 2);
+        if (i < p.missiles) {
+          g.fillStyle = rgba(HEX.hudInk, 0.85);
+          g.fill();
+        } else {
+          g.strokeStyle = rgba(HEX.hudInk, 0.3);
+          g.lineWidth = 1.2 * s;
+          g.stroke();
+        }
+      }
+      g.restore();
+    }
+
+    // ── Active missile tracking arrows ─────────────────────────────────
+    // Project each of the player's live missiles to screen and draw a
+    // small chevron pointing at them so the player can track where they're
+    // going.
+    {
+      const cam = ctx.cameraRig.camera;
+      const hw = this.w * 0.5;
+      const hh = this.h * 0.5;
+      const _mv = new Vector3();
+      for (const m of wep.active) {
+        if (!m.alive || m.owner !== p) continue;
+        _mv.set(m.pos.x, m.pos.y, m.pos.z);
+        _mv.project(cam);
+        // Behind the camera or off-screen: skip.
+        if (_mv.z > 1) continue;
+        const sx = (_mv.x * hw) + hw;
+        const sy = (-_mv.y * hh) + hh;
+        if (sx < -20 || sx > this.w + 20 || sy < -20 || sy > this.h + 20) continue;
+        g.save();
+        const a = 8 * s;
+        g.translate(sx, sy);
+        // Point the chevron from the player toward the missile.
+        const dx = sx - hw;
+        const dy = sy - hh;
+        const ang = Math.atan2(dy, dx);
+        g.rotate(ang);
+        g.fillStyle = rgba(HEX.boostHot, 0.85);
+        g.beginPath();
+        g.moveTo(a, 0);
+        g.lineTo(-a * 0.6, -a * 0.5);
+        g.lineTo(-a * 0.3, 0);
+        g.lineTo(-a * 0.6, a * 0.5);
+        g.closePath();
+        g.fill();
+        g.restore();
+      }
+    }
+  }
 
   private drawInfoSlab(ctx: GameContext, s: number) {
     const g = this.ctx2d;

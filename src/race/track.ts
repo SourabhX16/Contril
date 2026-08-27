@@ -75,6 +75,7 @@ import {
 import { CONFIG } from '../core/config';
 import { PAL } from '../core/palette';
 import { angleDelta, clamp, clamp01, smoothstep } from '../core/mathx';
+import { Rng } from '../core/rng';
 import { applyCel, createCelMaterial, SHARED } from '../render/celMaterial';
 import type { CelChunks } from '../render/celMaterial';
 import { GERSTNER_GLSL, sampleHeight, waveUniformArrays } from '../water/gerstner';
@@ -85,25 +86,146 @@ import type { Checkpoint, GameContext, Subsystem, TrackAPI, TrackPoint } from '.
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
- * Polygon vertices in metres, in the direction of travel, plus the fillet
- * radius at each vertex. The XZ pair is scaled by LAYOUT_SCALE to set the lap
- * length; the radii are NOT scaled, because they are dictated by the boat's
- * turning circle and not by how big we want the course to be.
+ * A vertex of the authoring polygon: world XZ plus the fillet radius at it.
+ * The radii are dictated by the boat's turning circle (anything above R ≈ 25 m
+ * is flat out), not by how big we want the course to be.
  */
-const LAYOUT_SCALE = 0.7;
-const VERTS: readonly (readonly [number, number, number])[] = [
-  [0, 0, 11], //     V0  hairpin      138° right → 17.8 m/s
-  [0, 300, 90], //   V1  wide sweeper  60° left  → flat out
-  [170, 400, 70], // V2                54° left  → flat out
-  [330, 330, 45], // V3                55° left  → flat out
-  [360, 180, 16], // V4  buoy turn     68° left  → 22.6 m/s
-  [270, 120, 17], // V5  counter-flick 72° right → 23.2 m/s
-  [300, 10, 13], //  V6  tight buoy    81° left  → 19.9 m/s
-  [100, -80, 120], // V7 kink           7° left  → flat out
-  [-160, -160, 55], // V8              66° left  → flat out
-  [-300, 0, 60], //  V9                72° left  → flat out
-  [-180, 200, 17], // V10             107° left  → 23.2 m/s
-];
+type LayoutVert = readonly [number, number, number];
+
+/** Lap length budget, metres. Roughly double the original authored circuit. */
+const LAP_MIN = 2400;
+const LAP_MAX = 3600;
+/** Vertex orbit band, metres. Keeps the footprint well inside the ocean grid. */
+const ORBIT_MIN = 360;
+const ORBIT_MAX = 700;
+/** Shortest usable straight between two fillets, metres. */
+const MIN_STRAIGHT = 28;
+/**
+ * Seed used when none is given (?seed= absent and no explicit seed passed) —
+ * the harness default, so captured frames stay reproducible.
+ */
+export const FALLBACK_SEED = 0x51ed7e11;
+
+/** Read ?seed= off the URL; null when absent. */
+export function resolveTrackSeed(): number | null {
+  const raw = new URLSearchParams(location.search).get('seed');
+  if (raw === null || raw === '') return null;
+  const n = Number(raw);
+  return Number.isFinite(n) ? (n >>> 0) : null;
+}
+
+/**
+ * Generate one candidate circuit: a **star polygon** — K vertices on individual
+ * orbits around the origin, ordered by angle — with a fillet radius at every
+ * vertex.
+ *
+ * Star shape buys simplicity for free: edges cannot cross, so the loop is a
+ * valid simple closed course no matter what the radii do, and the winding sums
+ * to exactly ±360°, which the curvature normalisation downstream requires.
+ *
+ * Fillets come in three deliberate buckets — genuine sub-25 m buoy corners the
+ * boat must brake for, medium 70 km/h turns, and flat-out sweepers — so no two
+ * seeds feel alike but every seed races properly.
+ */
+function generateLayout(rng: Rng): LayoutVert[] {
+  const K = rng.int(10, 12);
+
+  // Fillet classes, shuffled across the vertices: 3–4 real corners, 2–3
+  // mediums, the rest sweepers.
+  const fillets: number[] = [];
+  const push = (n: number, lo: number, hi: number) => {
+    for (let i = 0; i < n; i++) fillets.push(rng.range(lo, hi));
+  };
+  push(rng.int(3, 4), 12, 22);
+  push(rng.int(2, 3), 30, 58);
+  while (fillets.length < K) fillets.push(rng.range(65, 125));
+  for (let i = K - 1; i > 0; i--) {
+    const j = rng.int(0, i);
+    [fillets[i], fillets[j]] = [fillets[j], fillets[i]];
+  }
+
+  for (let attempt = 0; attempt < 48; attempt++) {
+    const verts: LayoutVert[] = [];
+    for (let i = 0; i < K; i++) {
+      const angle = (i / K) * Math.PI * 2 + rng.sym(0.34) * ((Math.PI * 2) / K);
+      const orbit = rng.range(ORBIT_MIN, ORBIT_MAX);
+      verts.push([
+        Math.sin(angle) * orbit,
+        Math.cos(angle) * orbit,
+        fillets[i],
+      ]);
+    }
+    if (layoutValid(verts)) return rotateToLongestLeg(verts);
+  }
+
+  // Statistically unreachable, but never ship a broken course: fall back to a
+  // doubled-scale version of the originally authored layout.
+  return (
+    [
+      [0, 0, 11], [0, 430, 90], [243, 571, 70], [471, 471, 45], [514, 257, 16],
+      [386, 171, 17], [429, 14, 13], [143, -114, 120], [-229, -229, 55], [-429, 0, 60],
+      [-257, 286, 17],
+    ] as LayoutVert[]
+  ).map(([x, z, r]) => [x * 1.0, z * 1.0, r] as LayoutVert);
+}
+
+/**
+ * Reject candidates whose fillets would crowd each other out. Mirrors the
+ * tangent-length arithmetic of `buildCentreline`, because that is the arithmetic
+ * that decides whether a straight survives.
+ */
+function layoutValid(verts: LayoutVert[]): boolean {
+  const n = verts.length;
+  const legLen: number[] = [];
+  const legHdg: number[] = [];
+  let perimeter = 0;
+  for (let i = 0; i < n; i++) {
+    const j = (i + 1) % n;
+    const dx = verts[j][0] - verts[i][0];
+    const dz = verts[j][1] - verts[i][1];
+    legLen.push(Math.hypot(dx, dz));
+    perimeter += Math.hypot(dx, dz);
+    legHdg.push(Math.atan2(dx, dz));
+  }
+  if (perimeter < LAP_MIN || perimeter > LAP_MAX * 1.15) return false;
+
+  let longest = 0;
+  for (let i = 0; i < n; i++) {
+    const j = (i + 1) % n;
+    const d = angleDelta(legHdg[(i - 1 + n) % n], legHdg[i]);
+    if (Math.abs(d) > (105 * Math.PI) / 180) return false;
+    // The two fillets sharing leg i sit at vertex i and vertex j.
+    const dJ = angleDelta(legHdg[(j - 1 + n) % n], legHdg[j % n]);
+    const tanI = verts[i][2] * Math.tan(Math.abs(d) / 2);
+    const tanJ = verts[j % n][2] * Math.tan(Math.abs(dJ) / 2);
+    // Ramp quarters eat another ~ramp/4 each side; demand real breathing room.
+    const straight = legLen[i] - tanI - tanJ - 18;
+    if (straight < MIN_STRAIGHT) return false;
+    longest = Math.max(longest, straight);
+  }
+  // The start grid (stacks back to ~40 m) plus a run to turn one must fit.
+  return longest > 150;
+}
+
+/**
+ * Rotate the vertex list so the longest leg is leg 0. `buildCentreline` places
+ * its start/finish seam 88 m down leg 0, so the seam always lands on a real
+ * straight with grid room behind it.
+ */
+function rotateToLongestLeg(verts: LayoutVert[]): LayoutVert[] {
+  const n = verts.length;
+  let best = 0;
+  let bestLen = -1;
+  for (let i = 0; i < n; i++) {
+    const j = (i + 1) % n;
+    const len = Math.hypot(verts[j][0] - verts[i][0], verts[j][1] - verts[i][1]);
+    if (len > bestLen) {
+      bestLen = len;
+      best = i;
+    }
+  }
+  return Array.from({ length: n }, (_, i) => verts[(best + i) % n]);
+}
 
 /**
  * Where the start/finish line sits, in metres measured from the exit of the
@@ -113,8 +235,8 @@ const VERTS: readonly (readonly [number, number, number])[] = [
  */
 const START_S = 88;
 
-/** Stations in the arc-length lookup. 2048 over ~1470 m ≈ 0.72 m spacing. */
-const STATIONS = 2048;
+/** Stations in the arc-length lookup. 3072 over ~3 km ≈ 1 m spacing. */
+const STATIONS = 3072;
 
 /**
  * Speed below which a corner counts as "maximally severe". Severity is defined
@@ -251,7 +373,7 @@ export class Track implements TrackAPI, Subsystem {
 
   readonly group = new Group();
   readonly checkpoints: GateSpec[] = [];
-  readonly length: number;
+  length!: number;
 
   /** Uniform-arc-length station tables. Index 0 is the start/finish line. */
   private readonly N = STATIONS;
@@ -324,8 +446,50 @@ export class Track implements TrackAPI, Subsystem {
   private lampAttr!: BufferAttribute;
   private lampTarget = -1;
 
-  constructor() {
-    const built = buildCentreline();
+  constructor(seed: number = FALLBACK_SEED) {
+    this.design = {
+      length: 0,
+      corners: [],
+      minRadius: 0,
+      maxDkDs: 0,
+      minSelfSeparation: 0,
+      closureGap: 0,
+      curvatureScale: 1,
+      ribbonSagitta: 0,
+      gateMinPlanDepth: 0,
+      gateArchClearance: 0,
+      cornerBoards: 0,
+    };
+    this.rebuild(seed);
+  }
+
+  /**
+   * Tear down every built mesh and rebuild the whole circuit from `seed`.
+   *
+   * Subsystems hold this object by reference and read its tables live, so a
+   * new race is an in-place regeneration — never a second Track. The one
+   * external thing that must follow is `Hud.refreshTrack()`, because the
+   * minimap bakes the old course into the chrome layer.
+   */
+  regenerate(seed: number) {
+    this.rebuild(seed);
+  }
+
+  private rebuild(seed: number) {
+    // Drop the previous course's GPU state before building anew.
+    for (const child of [...this.group.children]) {
+      this.group.remove(child);
+      const mesh = child as Mesh;
+      if (mesh.geometry) mesh.geometry.dispose();
+      const mat = (mesh as Mesh).material as { dispose?: () => void } | undefined;
+      if (mat && typeof mat.dispose === 'function') mat.dispose();
+    }
+    this.checkpoints.length = 0;
+    this.lampTarget = -1;
+    this.hullUniform.value.set(0, 0, 1e6);
+
+    const rng = new Rng(seed >>> 0);
+    const built = buildCentreline(generateLayout(rng));
     this.length = built.length;
     this.ds = built.length / this.N;
     this.px = built.px;
@@ -333,13 +497,12 @@ export class Track implements TrackAPI, Subsystem {
     this.tx = built.tx;
     this.tz = built.tz;
     this.pk = built.pk;
-    this.design = {
-      ...built.design,
+    Object.assign(this.design, built.design, {
       ribbonSagitta: 0,
       gateMinPlanDepth: 0,
       gateArchClearance: 0,
       cornerBoards: 0,
-    };
+    });
 
     this.buildPreview();
     this.buildSpeedProfile();
@@ -1692,14 +1855,14 @@ export class Track implements TrackAPI, Subsystem {
  *   6. resample to exactly uniform arc length and re-derive tangent and
  *      curvature from the final polyline, so what the AI reads is what is drawn.
  */
-function buildCentreline() {
-  const n = VERTS.length;
+function buildCentreline(verts: LayoutVert[]) {
+  const n = verts.length;
   const vx: number[] = [];
   const vz: number[] = [];
   const vr: number[] = [];
-  for (const [x, z, r] of VERTS) {
-    vx.push(x * LAYOUT_SCALE);
-    vz.push(z * LAYOUT_SCALE);
+  for (const [x, z, r] of verts) {
+    vx.push(x);
+    vz.push(z);
     vr.push(r);
   }
 

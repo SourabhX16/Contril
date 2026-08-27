@@ -6,7 +6,7 @@
  * — it only knows the interfaces in core/types.
  */
 
-import { Scene, Vector3 } from 'three';
+import { Plane, Raycaster, Scene, Vector2, Vector3 } from 'three';
 import { CONFIG } from './core/config';
 import { InputManager } from './core/input';
 import { clamp } from './core/mathx';
@@ -18,17 +18,27 @@ import { InkComposer } from './render/composer';
 import { SHARED } from './render/celMaterial';
 import { createSky } from './render/sky';
 import { Ocean } from './water/ocean';
-import { Track } from './race/track';
+import { Track, resolveTrackSeed } from './race/track';
 import { BoatPhysics, createRacer } from './boat/boat';
 import { AiDrivers } from './race/ai';
 import { RaceState } from './race/raceState';
+import { Weapons } from './race/weapons';
 import { Riders } from './rider/rider';
 import { ChaseCamera, type CameraPreset } from './camera/chaseCamera';
 import { Hud } from './ui/hud';
 import { GameAudio } from './audio/audio';
 import { NetSession, type StartMsg } from './net/session';
+import { FALLBACK_SEED } from './race/track';
 import { NetSync } from './net/netSync';
 import { Menu } from './ui/menu';
+
+/** Reusable up vector to avoid per-frame allocations in respawn placement. */
+const _up = new Vector3(0, 1, 0);
+/** Reusable raycaster + water plane for missile aim projection. */
+const _raycaster = new Raycaster();
+const _aimNdc = new Vector2();
+const _waterPlane = new Plane(new Vector3(0, 1, 0), 0);
+const _aimPt = new Vector3();
 
 /** Grid names per slot. Humans rename slots 1–3 only by joining them. */
 export const SLOT_NAMES = ['YOU', 'KAIRA', 'NOX', 'PIP'];
@@ -48,6 +58,7 @@ class Game {
   private racers: Racer[] = [];
   private session: NetSession;
   private netSync!: NetSync;
+  private weapons!: Weapons;
   private menu!: Menu;
 
   private ctx: GameContext;
@@ -103,6 +114,13 @@ class Game {
       onStart: (msg) => this.beginNetRace(msg),
       onSnapshot: (snap) => this.netSync.ingest(snap),
       onAiBatch: (batch) => batch.forEach((s) => this.netSync.ingest(s)),
+      onMissile: (msg) => {
+        // Spawn a remote missile from the firing racer's position toward the target.
+        const r = this.racers[msg.slot];
+        if (r && this.weapons) {
+          this.weapons.spawnRemote(r, msg.ox, msg.oz, msg.tx, msg.tz);
+        }
+      },
       onError: (message) => {
         void this.backToMenu();
         this.menu.showError(message);
@@ -136,23 +154,44 @@ class Game {
     };
 
     // ── Subsystems, in execution order ──────────────────────────────────────
+    const physics = new BoatPhysics(this.racers);
+    this.weapons = new Weapons(this.racers);
+    this.ctx.weapons = this.weapons;
     this.subsystems = [
       this.ocean,
       this.track,
-      new BoatPhysics(this.racers),
-      new AiDrivers(this.racers, this.track),
+      physics,
+      this.weapons,
+      new AiDrivers(this.racers, this.track, physics),
       this.netSync,
       this.race,
       new Riders(this.racers),
     ].sort((a, b) => a.order - b.order);
 
-    // Restart requests route through the network when one is live.
+    // Restart requests route through the network when one is live. The circuit
+    // is kept across restarts — you rerun the course you just raced.
     this.race.onRestartRequest = () => {
       if (!this.session.active) return false;
       const cd = CONFIG.race.countdownSeconds * 1000;
-      this.session.broadcastStart(cd);
-      this.beginNetRace({ cd });
+      this.session.broadcastStart(cd, this.trackSeed);
+      this.beginNetRace({ cd, seed: this.trackSeed });
       return true;
+    };
+
+    // Skip-penalty respawn: teleport the racer to their last completed
+    // checkpoint, facing forward, speed zeroed. Works for both player and AI.
+    this.race.onRespawnRequest = (racer) => {
+      const cps = this.track.checkpoints;
+      const idx = racer.nextCheckpoint > 0
+        ? (racer.nextCheckpoint - 1 + cps.length) % cps.length
+        : cps.length - 1;
+      const s = cps[idx].s;
+      const p = this.track.sample(s / this.track.length);
+      racer.root.position.set(p.position.x, p.position.y + 0.35, p.position.z);
+      racer.root.quaternion.setFromAxisAngle(_up, Math.atan2(p.tangent.x, p.tangent.z));
+      racer.state.velocity.set(0, 0, 0);
+      racer.state.heading = Math.atan2(p.tangent.x, p.tangent.z);
+      racer.state.checkpointBoostTime = 0;
     };
 
     // ── Menu ────────────────────────────────────────────────────────────────
@@ -171,8 +210,10 @@ class Game {
         start: () => {
           if (this.session.role !== 'host') return;
           const cd = CONFIG.race.countdownSeconds * 1000;
-          this.session.broadcastStart(cd);
-          this.beginNetRace({ cd });
+          const seed = this.nextTrackSeed();
+          this.newCircuit(seed);
+          this.session.broadcastStart(cd, seed);
+          this.beginNetRace({ cd, seed });
         },
         leave: () => void this.backToMenu(),
       },
@@ -225,6 +266,7 @@ class Game {
       r.state.boostMeter = 0;
       r.state.driftCharge = 0;
       r.state.driftTier = 0;
+      r.state.checkpointBoostTime = 0;
       r.lap = 0;
       r.nextCheckpoint = 0;
       r.progress = 0;
@@ -234,6 +276,9 @@ class Game {
       r.lapTimes = [];
       r.bestLap = Infinity;
       r.wrongWay = false;
+      r.missiles = 0;
+      r.checkpointStreak = 0;
+      r.skippedCheckpoints = 0;
     }
     // Remote snapshots describe the *previous* race; drop them so remote boats
     // hold their grid marks until fresh frames arrive.
@@ -267,6 +312,7 @@ class Game {
 
   /** Classic single-player: slot 0 is you, slots 1–3 are the AI field. */
   private startSolo() {
+    this.newCircuit();
     for (const r of this.racers) {
       r.isPlayer = r.id === 0;
       r.remote = false;
@@ -278,8 +324,41 @@ class Game {
     this.race.paused = false;
   }
 
+  // ── Procedural circuits ────────────────────────────────────────────────────
+
+  /** Seed of the circuit currently built. Shared over the network per race. */
+  trackSeed = FALLBACK_SEED;
+
+  /**
+   * Build a fresh circuit in place and rebake the minimap.
+   *
+   * ?seed= wins (the harness depends on it); the harness otherwise falls back
+   * to a fixed default so captured frames stay reproducible; a human solo race
+   * draws a new seed every time, which is the point of generating tracks at all.
+   */
+  private nextTrackSeed(): number {
+    return (
+      resolveTrackSeed() ??
+      (CONFIG.debug.harness
+        ? FALLBACK_SEED
+        : Math.floor(Math.random() * 2 ** 32) >>> 0)
+    );
+  }
+
+  private newCircuit(seed: number = this.nextTrackSeed()) {
+    this.trackSeed = seed;
+    this.track.regenerate(seed);
+    this.hud.refreshTrack();
+    // Grid marks come from the new centreline; everyone re-seats on it.
+    this.resetRacers();
+  }
+
   /** A start (or restart) message arrived — or the host just sent one. */
   private beginNetRace(msg: StartMsg) {
+    // The host's seed defines the circuit; guests rebuild before anyone moves.
+    if (typeof msg.seed === 'number' && msg.seed !== this.trackSeed) {
+      this.newCircuit(msg.seed >>> 0);
+    }
     this.applyRoster();
     this.netSync.reset();
     this.session.raceRunning = true;
@@ -375,6 +454,48 @@ class Game {
       pc.throttle = s.throttle;
       pc.brake = s.brake;
       pc.drift = s.drift;
+
+    }
+
+    // ── Missile fire ──────────────────────────────────────────────────
+    // Left click / F / pad X all fire.  Scoped, the shot goes where the
+    // scope reticle points (a ray from the camera through screen centre);
+    // unscoped it launches straight off the bow.
+    // Runs even during forcedControls (riding) so the player can shoot.
+    {
+      const s = this.input.state;
+      if (s.firePressed && ctx.weapons && ctx.race.phase === 'racing') {
+        const me = ctx.player;
+        const heading = me.state.heading;
+        let tx: number;
+        let tz: number;
+        if (s.scopeHeld) {
+          _aimNdc.set(0, 0);
+          _raycaster.setFromCamera(_aimNdc, this.cameraRig.camera);
+          const hit = _raycaster.ray.intersectPlane(_waterPlane, _aimPt);
+          if (hit) {
+            tx = hit.x;
+            tz = hit.z;
+          } else {
+            // Ray above the horizon: throw toward the horizon point instead.
+            const d = _raycaster.ray.direction;
+            tx = this.cameraRig.camera.position.x + d.x * 300;
+            tz = this.cameraRig.camera.position.z + d.z * 300;
+          }
+        } else {
+          tx = me.state.position.x + Math.sin(heading) * 200 + s.stickRx * 80;
+          tz = me.state.position.z + Math.cos(heading) * 200 + s.stickRy * 80;
+        }
+        if (ctx.weapons.fire(me, tx, tz)) {
+          this.session.broadcastMissile({
+            slot: me.id,
+            ox: Math.round(me.state.position.x * 10) / 10,
+            oz: Math.round(me.state.position.z * 10) / 10,
+            tx: Math.round(tx * 10) / 10,
+            tz: Math.round(tz * 10) / 10,
+          });
+        }
+      }
     }
     // (Restart input on the results screen is consumed by the race state
     // machine, which routes it through the network when one is live.)
@@ -387,11 +508,25 @@ class Game {
     // ── Subsystems ──────────────────────────────────────────────────────────
     for (const s of this.subsystems) s.update(ctx);
 
+    // Drain AI missile fires for network broadcast.
+    if (this.weapons) {
+      for (const f of this.weapons.pendingFires) {
+        this.session.broadcastMissile(f);
+      }
+      this.weapons.pendingFires.length = 0;
+    }
+
     // Camera and audio run after everything that can move the boat.
     if (this.race.phase === 'countdown' || this.race.phase === 'results') {
       this.cameraRig.applyCinematicOrbit(ctx);
       this.cameraRig.update(ctx);
     } else {
+      // Scope mode: right-click held → camera zooms in, mouse rotates the view.
+      const scopeHeld = this.input.state.scopeHeld && this.race.phase === 'racing';
+      this.cameraRig.setMode(scopeHeld ? 'scope' : 'chase');
+      if (scopeHeld) {
+        this.cameraRig.addLook(this.input.state.lookDx, this.input.state.lookDy);
+      }
       this.cameraRig.update(ctx);
     }
     this.audio.update(ctx);

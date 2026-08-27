@@ -80,6 +80,14 @@ export class RaceState implements RaceAPI, Subsystem {
    */
   onRestartRequest: (() => boolean) | null = null;
 
+  /**
+   * Set by main to handle checkpoint-skip respawns. Called when a racer
+   * collects more than `CONFIG.race.skipLimit` checkpoints in a single frame,
+   * which means they are either stuck against a gate and rubber-banding or they
+   * have been teleported past a segment of the circuit.
+   */
+  onRespawnRequest: ((r: Racer) => void) | null = null;
+
   private progressData = new Map<number, RacerProgress>();
   private finishOrder: Racer[] = [];
   private resultsTimer = 0;
@@ -304,12 +312,19 @@ export class RaceState implements RaceAPI, Subsystem {
   /**
    * Gates as odometer milestones. `nextCheckpoint` walks 1 → 11 → 0, where 0
    * means "the finish line", whose milestone is a full lap of distance.
+   *
+   * Every non-finish checkpoint that fires gives the racer a short thrust
+   * reward (`checkpointBoostTime`). Multiple non-finish checkpoints firing in
+   * the same frame counts as a *skip* — the racer got past gates they did not
+   * legitimately cross. Three or more consecutive skips triggers an external
+   * respawn so the racer does not end up stranded against a gate they skipped.
    */
   private advanceGates(ctx: GameContext, r: Racer, d: RacerProgress) {
     const cps = this.track.checkpoints;
     // Forward: a fast boat can clear two milestones in a frame at 60 fps only if
     // gates were 0.5 m apart, but the loop costs nothing and removes the class of
     // bug entirely.
+    let checkpointsPassed = 0;
     for (let guard = 0; guard <= cps.length; guard++) {
       const idx = r.nextCheckpoint;
       if (idx === 0) {
@@ -322,8 +337,33 @@ export class RaceState implements RaceAPI, Subsystem {
       if (d.lapDistance < milestone) break;
       r.nextCheckpoint = (idx + 1) % cps.length;
       this.gateLog.get(r.id)!.push(idx);
+      checkpointsPassed++;
       if (r.isPlayer) ctx.audio.checkpoint();
     }
+
+    // ── Checkpoint reward / skip detection ───────────────────────────────
+    if (checkpointsPassed === 1) {
+      // Clean pass: credit streak, apply the thrust reward.
+      r.checkpointStreak++;
+      r.skippedCheckpoints = 0;
+      r.state.checkpointBoostTime = CONFIG.race.cpBoostDuration;
+      // Missile award: every `awardEvery` clean passes, load a missile (capped).
+      if (r.checkpointStreak % CONFIG.weapons.awardEvery === 0) {
+        r.missiles = Math.min(r.missiles + 1, CONFIG.weapons.missileCap);
+      }
+    } else if (checkpointsPassed > 1) {
+      // Multiple non-finish checkpoints in a single frame = gates skipped.
+      r.skippedCheckpoints += checkpointsPassed - 1;
+      r.checkpointStreak = 0;
+    }
+
+    // Respawn if too many consecutive skips pile up (the racer is stuck or
+    // teleported past a section and will never reach those gates normally).
+    if (r.skippedCheckpoints > CONFIG.race.skipLimit) {
+      this.onRespawnRequest?.(r);
+      r.skippedCheckpoints = 0;
+    }
+
     // Backward: a spin or a wrong-way excursion rewinds the odometer, so rewind
     // the gate pointer with it. Otherwise the racer keeps their credit for a
     // gate they are now behind, and the next lap's gate order is nonsense.
@@ -348,6 +388,9 @@ export class RaceState implements RaceAPI, Subsystem {
     r.lapTimes.push(lapTime);
     if (lapTime < r.bestLap) r.bestLap = lapTime;
     r.lap++;
+    // A clean lap completion wipes the skip counter — whatever happened mid-lap
+    // is over once the start line is crossed.
+    r.skippedCheckpoints = 0;
 
     if (r.lap >= CONFIG.race.laps) {
       r.finished = true;

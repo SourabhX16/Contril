@@ -34,7 +34,7 @@ import { CONFIG } from '../core/config';
 import { clamp, clamp01, damp, dampAngle } from '../core/mathx';
 import type { CameraRig, GameContext } from '../core/types';
 
-export type CameraMode = 'chase' | 'orbit' | 'cinematic' | 'far' | 'bow';
+export type CameraMode = 'chase' | 'orbit' | 'cinematic' | 'far' | 'bow' | 'scope';
 
 /** Fixed rigs the harness can request by name. */
 export type CameraPreset =
@@ -57,6 +57,18 @@ const CHASE_DIST_TRIM = 0.58;
  * the crests stand up against the sky and break the horizon line.
  */
 const CHASE_HEIGHT_TRIM = 0.44;
+
+/**
+ * Scope free-look sensitivity, radians per pixel of mouse movement. ~500 px
+ * of travel sweeps a bit over 100° — quick enough to track a rival without
+ * being twitchy at 28° FOV.
+ */
+const SCOPE_LOOK_SENS = 0.0038;
+/** Chase-mode free-look sensitivity, radians per pixel of mouse movement. */
+const FREELOOK_SENS = 0.002;
+/** Scope rig distance behind the hull and base height above it, metres. */
+const SCOPE_DIST = 7;
+const SCOPE_HEIGHT = 2.4;
 
 /**
  * Vertical follow rates, 1/s. The rig tracks the hull's height through a damp,
@@ -126,6 +138,23 @@ export class ChaseCamera implements CameraRig {
    */
   private cinematicFrame = -1;
   private snapNext = true;
+  /**
+   * Scope free-look angles. Yaw is absolute (radians, same convention as boat
+   * heading); pitch is positive looking down at the water. Initialised from
+   * the hull on scope entry.
+   */
+  private scopeYaw = 0;
+  private scopePitch = 0.28;
+  /**
+   * Chase-mode free-look offsets from the auto-follow yaw. Mouse orbits the
+   * view around the boat; after a moment of rest they ease back to zero so
+   * the rig returns to the racing shot. Pitch offset tilts the look point.
+   */
+  private freeYaw = 0;
+  private freePitch = 0;
+  private lastLookTime = -10;
+  /** Mode last frame, to detect the chase→scope transition and reset the look. */
+  private lastMode: CameraMode = 'chase';
 
   constructor(aspect: number) {
     this.camera = new PerspectiveCamera(
@@ -146,6 +175,24 @@ export class ChaseCamera implements CameraRig {
   setPreset(preset: CameraPreset) {
     this.preset = preset === 'auto' ? null : preset;
     if (preset === 'auto') this.mode = 'chase';
+  }
+
+  /**
+   * Rotate the view with raw mouse deltas.
+   *
+   * Sign: increasing yaw turns toward +X, which is the boat's LEFT (a hull
+   * facing +Z has its right side at −X), so mouse-right must SUBTRACT from
+   * yaw to pan the view right. Vertical is standard: mouse-down looks down.
+   */
+  addLook(dx: number, dy: number) {
+    if (dx !== 0 || dy !== 0) this.lastLookTime = performance.now() / 1000;
+    if (this.mode === 'scope') {
+      this.scopeYaw -= dx * SCOPE_LOOK_SENS;
+      this.scopePitch = clamp(this.scopePitch + dy * SCOPE_LOOK_SENS, -0.32, 1.05);
+    } else {
+      this.freeYaw = clamp(this.freeYaw - dx * FREELOOK_SENS, -Math.PI * 0.75, Math.PI * 0.75);
+      this.freePitch = clamp(this.freePitch + dy * FREELOOK_SENS, -0.4, 0.55);
+    }
   }
 
   addShake(amount: number) {
@@ -200,6 +247,8 @@ export class ChaseCamera implements CameraRig {
       this.camera.position.copy(_orbitPos);
       this.lookAt.copy(_orbitLook);
       this.roll = damp(this.roll, 0, 4, dt);
+    } else if (this.mode === 'scope') {
+      this.applyScope(ctx, _target);
     } else {
       this.applyChase(ctx, _target);
     }
@@ -214,14 +263,17 @@ export class ChaseCamera implements CameraRig {
     this.fovPunch = damp(this.fovPunch, 0, 6.5, dt);
 
     const boosting = s.boostTime > 0 ? 1 : 0;
+    // Scope mode: lock to a narrow 28° FOV for precision aiming.
+    const scopeFov = this.mode === 'scope' ? 28 : 0;
     const targetFov =
-      this.baseFov +
+      scopeFov ||
+      (this.baseFov +
       CONFIG.render.fovSpeedKick * s.speedFrac +
       boosting * 6.5 +
       this.fovPunch +
       // A landing throws the frame open for a beat. Unlike a shake this survives
       // a screenshot.
-      this.landKick * 9;
+      this.landKick * 9);
     this.camera.fov = damp(this.camera.fov, targetFov, 5.5, dt);
     this.camera.updateProjectionMatrix();
 
@@ -247,6 +299,7 @@ export class ChaseCamera implements CameraRig {
     // has to be applied on top of it rather than baked into the up vector.
     if (Math.abs(this.roll) > 1e-4) this.camera.rotateZ(this.roll);
     this.snapNext = false;
+    this.lastMode = this.mode;
   }
 
   // ── Modes ─────────────────────────────────────────────────────────────────
@@ -345,6 +398,50 @@ export class ChaseCamera implements CameraRig {
     // only part of a landing that survives a screenshot.
     const cap = 0.075 + this.landKick * 0.065;
     this.roll = damp(this.roll, clamp(rollTarget, -cap, cap), 4.6, dt);
+  }
+
+  /**
+   * Scope camera: a free-look rig that orbits the hull. The mouse rotates
+   * `scopeYaw`/`scopePitch`, the camera hangs opposite the look direction, and
+   * the look-at runs ALONG that direction — so the screen centre is exactly
+   * where a shot will go. Position follows instantly (no spring lag): a
+   * shooter's aim must be 1:1 with the mouse or it reads as broken.
+   */
+  private applyScope(ctx: GameContext, target: Vector3) {
+    // Entering scope: start looking where the boat is headed, slightly down.
+    if (this.lastMode !== 'scope') {
+      this.scopeYaw = ctx.player.state.heading;
+      this.scopePitch = 0.28;
+      this.camera.position.set(
+        target.x - Math.sin(this.scopeYaw) * SCOPE_DIST,
+        target.y + SCOPE_HEIGHT,
+        target.z - Math.cos(this.scopeYaw) * SCOPE_DIST,
+      );
+    }
+
+    const cp = Math.cos(this.scopePitch);
+    const dirX = Math.sin(this.scopeYaw) * cp;
+    const dirZ = Math.cos(this.scopeYaw) * cp;
+
+    // Eye sits opposite the look direction so the hull stays just below the
+    // centre line; pitch lifts/drops the eye to keep the water in frame.
+    // Copied, not sprung — aim must track the mouse 1:1.
+    this.camera.position.set(
+      target.x - dirX * SCOPE_DIST,
+      target.y + SCOPE_HEIGHT + Math.sin(this.scopePitch) * 1.6,
+      target.z - dirZ * SCOPE_DIST,
+    );
+
+    // Look far along the view ray — the screen centre is where a shot goes.
+    _look.set(
+      this.camera.position.x + dirX * 120,
+      this.camera.position.y - Math.sin(this.scopePitch) * 120,
+      this.camera.position.z + dirZ * 120,
+    );
+    this.lookAt.copy(_look);
+
+    // Level horizon: the reticle must not roll.
+    this.roll = damp(this.roll, 0, 8, ctx.dt);
   }
 
   private smoothFollow(desired: Vector3, stiffness: number, dt: number) {

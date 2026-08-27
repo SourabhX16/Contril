@@ -41,7 +41,7 @@ subsystems be built in parallel without merge conflicts or integration surprises
 | **water** | `src/water/ocean.ts`, `oceanMaterial.ts`, `foam.ts`, `spray.ts` | Ocean mesh, water shader, all foam/spray FX |
 | **cel** | `src/render/celMaterial.ts`, `textures.ts`, `composer.ts`, `sky.ts`, `outline.ts` | Cel pipeline, outlines, post stack, sky |
 | **boat** | `src/boat/*` | Hull geometry, buoyancy, handling, drift/boost |
-| **race** | `src/race/*` | Spline course, gates, laps, AI drivers |
+| **race** | `src/race/*` | Spline course, gates, laps, AI drivers, missiles & collisions |
 | **net** | `src/net/*` | P2P lobby + snapshot broadcast/interpolation (Trystero, WebRTC) |
 | **rider** | `src/rider/*` | Rider rig, procedural animation |
 | **presentation** | `src/ui/*`, `src/audio/*`, `src/camera/*` | HUD, screens, camera rig, synthesised audio |
@@ -96,6 +96,7 @@ entirely (the sky and the water use this).
  10  input
  20  ocean          (advance wave time, recentre grid)
  30  boat physics   (samples ocean; skips network-owned boats)
+ 35  weapons        (missile flight, tidal-wave impulse, proximity)
  40  ai drivers     (writes controls consumed next frame)
  45  net sync       (broadcast own boat; interpolate remote boats)
  50  race state     (checkpoints, laps, standings)
@@ -125,6 +126,11 @@ relays, so the build stays a static site. The three rules that keep it sane:
    re-derived locally from shared positions. Start/restart messages carry only
    a countdown in milliseconds; each client anchors it to `performance.now()`,
    so wall-clock skew between machines never enters the race.
+4. **Missiles broadcast fire events.** When any racer fires, a `MissileMsg`
+   (slot, origin, target) is sent to all peers. Each client spawns a visual-
+   only remote missile via `Weapons.spawnRemote()` — same tidal-wave physics,
+   no stock deduction. The host simulates AI fires and broadcasts them; player
+   fires broadcast immediately from the client.
 
 ## Harness API
 

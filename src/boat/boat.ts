@@ -25,7 +25,12 @@ import { createBoatMesh, GRIP_HALF_WIDTH, GRIP_LOCAL, SEAT_LOCAL, type BoatMesh 
 import { BoatPhysics } from './boatPhysics';
 
 const RACER_NAMES = ['YOU', 'KAIRA', 'NOX', 'PIP'];
-const PERSONALITIES = [null, 'aggressive', 'clean', 'erratic'] as const;
+/**
+ * One archetype per AI slot. KAIRA hunts you, NOX shoots at you, PIP never
+ * lifts. `main.ts` maps lobby slots onto these, so a multiplayer fill and a
+ * solo field behave identically.
+ */
+const PERSONALITIES = [null, 'rammer', 'shooter', 'neverdecel'] as const;
 
 /** Mesh handles, by racer id. Lets other subsystems find the seat and the hull. */
 const meshes = new Map<number, BoatMesh>();
@@ -60,6 +65,7 @@ export function createRacer(id: RacerId, position: Vector3, heading: number): Ra
     driftTier: 0,
     boostTime: 0,
     boostMeter: 0,
+    checkpointBoostTime: 0,
     appliedThrottle: 0,
   };
 
@@ -83,6 +89,9 @@ export function createRacer(id: RacerId, position: Vector3, heading: number): Ra
     lapTimes: [],
     bestLap: Infinity,
     wrongWay: false,
+    missiles: 0,
+    checkpointStreak: 0,
+    skippedCheckpoints: 0,
   };
 }
 

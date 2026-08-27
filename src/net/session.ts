@@ -52,6 +52,12 @@ export type RosterMsg = {
 export type StartMsg = {
   /** Milliseconds until the green light, counted from receipt. */
   cd: number;
+  /**
+   * Seed of the procedural circuit. Every client regenerates the identical
+   * track from this one number — the only way a generated course can be shared
+   * without shipping geometry.
+   */
+  seed?: number;
   /** Roster snapshot so mid-race joiners can start cold. */
   players?: LobbyPlayer[];
 };
@@ -75,6 +81,18 @@ export type BoatSnap = [
   airborne: 0 | 1,
 ];
 
+/** Missile fire event — broadcast when any racer launches. */
+export type MissileMsg = {
+  /** Racer slot who fired. */
+  slot: number;
+  /** Origin position. */
+  ox: number;
+  oz: number;
+  /** Target position. */
+  tx: number;
+  tz: number;
+};
+
 export interface NetHooks {
   /** Roster or connectivity changed while in the lobby. */
   onLobbyChanged(): void;
@@ -84,6 +102,8 @@ export interface NetHooks {
   onSnapshot(snap: BoatSnap): void;
   /** The host's batched AI snapshots arrived (guests only). */
   onAiBatch(batch: BoatSnap[]): void;
+  /** A missile was fired by a remote racer. */
+  onMissile(msg: MissileMsg): void;
   /** Fatal session problem — caller should drop back to the menu. */
   onError(message: string): void;
 }
@@ -106,6 +126,7 @@ export class NetSession {
   private sendStart: ((data: StartMsg) => Promise<void>) | null = null;
   private sendState: ((data: BoatSnap) => Promise<void>) | null = null;
   private sendAi: ((data: BoatSnap[]) => Promise<void>) | null = null;
+  private sendMissile: ((data: MissileMsg) => Promise<void>) | null = null;
   /**
    * Names announced before the host has seen the peer join (the two events
    * race across different relays), parked here until the slot is assigned.
@@ -162,10 +183,10 @@ export class NetSession {
   }
 
   /** Anyone may start a race or restart a finished one. */
-  broadcastStart(cd: number): void {
+  broadcastStart(cd: number, seed?: number): void {
     const players =
       this.role === 'host' ? this.roster : undefined;
-    void this.sendStart?.({ cd, players });
+    void this.sendStart?.({ cd, seed, players });
   }
 
   broadcastState(snap: BoatSnap): void {
@@ -174,6 +195,10 @@ export class NetSession {
 
   broadcastAi(batch: BoatSnap[]): void {
     void this.sendAi?.(batch);
+  }
+
+  broadcastMissile(msg: MissileMsg): void {
+    void this.sendMissile?.(msg);
   }
 
   /** Peer count right now (excluding self). */
@@ -239,6 +264,10 @@ export class NetSession {
     const aiAction = room.makeAction<BoatSnap[]>('ai');
     aiAction.onMessage = (batch) => this.hooks.onAiBatch(batch);
     this.sendAi = aiAction.send;
+
+    const missileAction = room.makeAction<MissileMsg>('msl');
+    missileAction.onMessage = (msg) => this.hooks.onMissile(msg);
+    this.sendMissile = missileAction.send;
   }
 
   private onPeerJoin(peerId: string): void {
